@@ -60,29 +60,32 @@ async def read_chapter(page, chapter_url, remaining_time):
 
 async def simulate_session(session_id):
     """🔄 Имитация пользовательской сессии"""
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, args=["--start-maximized"])  # Запуск в нормальном режиме
-        context = await browser.new_context(viewport={"width": 1280, "height": 720})  # Размер окна браузера
-        page = await context.new_page()
-        await stealth(page)  # Активация Stealth Mode
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True, args=["--start-maximized"])  # Запуск в нормальном режиме
+            context = await browser.new_context(viewport={"width": 1280, "height": 720})  # Размер окна браузера
+            page = await context.new_page()
+            await stealth(page)  # Активация Stealth Mode
 
-        session_time = random.uniform(MIN_SESSION_TIME, MAX_SESSION_TIME)
-        remaining_time = session_time
+            session_time = random.uniform(MIN_SESSION_TIME, MAX_SESSION_TIME)
+            remaining_time = session_time
 
-        logger.info(f"{Fore.MAGENTA}🕵️ Начинаем сессию {session_id}, длительность: {session_time:.1f} сек{Style.RESET_ALL}")
+            logger.info(f"{Fore.MAGENTA}🕵️ Начинаем сессию {session_id}, длительность: {session_time:.1f} сек{Style.RESET_ALL}")
 
-        chapter_urls = [f"{BOOK_URL}/{chapter_id}" for chapter_id in CHAPTER_IDS]
-        weighted_chapters = random.choices(chapter_urls, weights=CHAPTER_DISTRIBUTION, k=len(chapter_urls))
+            chapter_urls = [f"{BOOK_URL}/{chapter_id}" for chapter_id in CHAPTER_IDS]
+            weighted_chapters = random.choices(chapter_urls, weights=CHAPTER_DISTRIBUTION, k=len(chapter_urls))
 
-        for chapter_url in weighted_chapters:
-            if remaining_time <= 0:
-                break
-            spent_time = await read_chapter(page, chapter_url, remaining_time)
-            remaining_time -= spent_time
+            for chapter_url in weighted_chapters:
+                if remaining_time <= 0:
+                    break
+                spent_time = await read_chapter(page, chapter_url, remaining_time)
+                remaining_time -= spent_time
 
-        logger.info(f"{Fore.BLUE}📌 Сессия {session_id} завершена. Осталось времени: {remaining_time:.1f} сек{Style.RESET_ALL}")
+            logger.info(f"{Fore.BLUE}📌 Сессия {session_id} завершена. Осталось времени: {remaining_time:.1f} сек{Style.RESET_ALL}")
 
-        await browser.close()
+            await browser.close()
+    except Exception as e:
+        logger.error(f"{Fore.RED}❌ Ошибка в сессии {session_id}: {e}{Style.RESET_ALL}")
 
 async def main():
     """Запускаем несколько сессий"""

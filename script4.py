@@ -61,7 +61,7 @@ async def read_chapter(page, chapter_url, remaining_time):
 async def simulate_session(session_id):
     """🔄 Имитация пользовательской сессии"""
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False, args=["--start-maximized"])  # Запуск в нормальном режиме
+        browser = await p.chromium.launch(headless=True, args=["--start-maximized"])  # Запуск в нормальном режиме
         context = await browser.new_context(viewport={"width": 1280, "height": 720})  # Размер окна браузера
         page = await context.new_page()
         await stealth(page)  # Активация Stealth Mode

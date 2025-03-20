@@ -12,14 +12,6 @@ import requests
 from selenium import webdriver
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
-import random
-import time
-from undetected_chromedriver import Chrome, ChromeOptions
-from colorama import Fore, Style
 
 # Инициализация colorama для цветного вывода в консоли
 init()
@@ -28,8 +20,7 @@ init()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
-
+# Функция для получения списка прокси
 def get_proxy_list():
     api_url = "https://proxy-bunker.com/api2.php"
     try:
@@ -44,7 +35,6 @@ def get_proxy_list():
     except requests.RequestException as e:
         logger.error(f"{Fore.RED}Ошибка при получении списка прокси: {e}{Style.RESET_ALL}")
         return []
-
 
 # Конфигурация
 BOOK_URL = "https://author.today/reader/89419"  # Ссылка на книгу
@@ -62,14 +52,12 @@ USE_PROXIES = False  # Использовать прокси (True) или не�
 if USE_PROXIES:
     PROXY_LIST = get_proxy_list()
     print(PROXY_LIST)
-    # PROXY_LIST = ["http://185.158.114.14:26935"]
 else:
     PROXY_LIST = []
 
 VISUAL_MODE = False  # True - видимый браузер и одна сессия, False - скрытый режим и консоль
 SESSION_DELAY = (5, 10)  # Диапазон задержки между сессиями (в секундах)
 MAX_PROXY_RETRIES = 3
-
 
 # Установка MAX_WORKERS в зависимости от VISUAL_MODE
 MAX_WORKERS = 1 if VISUAL_MODE else MAX_WORKERS_DEFAULT
@@ -89,9 +77,7 @@ if MIN_SESSION_TIME >= MAX_SESSION_TIME:
 if MIN_SESSION_TIME < MIN_READING_TIME:
     raise ValueError("MIN_SESSION_TIME должен быть больше MIN_READING_TIME")
 
-
-
-
+# Список user-agents для мобильного режима
 user_agents = [
     "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
     "Mozilla/5.0 (iPhone; CPU iPhone OS 15_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.6 Mobile/15E148 Safari/604.1",
@@ -103,6 +89,7 @@ user_agents = [
     "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.93 Mobile Safari/537.36"
 ]
 
+# Настройка драйвера (мобильный режим)
 def setup_driver(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE, retries=0):
     chrome_options = Options()
     
@@ -170,7 +157,6 @@ def setup_driver(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE, retries=0):
             logger.error(f"{Fore.RED}Не удалось настроить драйвер после {MAX_PROXY_RETRIES} попыток: {e}{Style.RESET_ALL}")
             return None
 
-
 # Проверка на Cloudflare
 def check_cloudflare(driver):
     try:
@@ -178,7 +164,6 @@ def check_cloudflare(driver):
             EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'Проверка')]"))
         )
         logger.warning(f"{Fore.YELLOW}Обнаружена проверка Cloudflare. Ожидание...{Style.RESET_ALL}")
-        # Имитация прокрутки для прохождения проверки
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
         time.sleep(random.uniform(1, 3))
         driver.execute_script("window.scrollTo(0, 0);")
@@ -219,7 +204,6 @@ def navigate_through_filters(driver):
 
 
 
-
 def read_chapter_mobile(driver, chapter_url, remaining_time):
     try:
         # Задержка перед загрузкой страницы
@@ -243,14 +227,20 @@ def read_chapter_mobile(driver, chapter_url, remaining_time):
         current_position = 0
         time_spent = initial_delay
 
-        reading_stages = max(3, min(random.randint(5, 10), int(page_height / screen_height)))
-        stage_duration = reading_time / reading_stages
-        swipe_distance = min(screen_height * random.uniform(0.3, 0.6), page_height / reading_stages)
+        # Определяем расстояние одного свайпа (10% высоты экрана для большей частоты)
+        swipe_distance = int(screen_height * 0.1)  # 10% высоты экрана
+        # Рассчитываем количество свайпов, чтобы покрыть всю страницу
+        total_swipes_needed = max(1, int(page_height / swipe_distance)) + 1  # +1 для уверенности
+        # Распределяем свайпы по времени чтения
+        stage_duration = reading_time / total_swipes_needed
 
         last_action_time = 0
-        min_action_interval = 4
+        min_action_interval = 2  # Уменьшаем минимальный интервал для более частых свайпов
 
-        for stage in range(reading_stages):
+        # Находим элемент body
+        body_element = driver.find_element(By.TAG_NAME, "body")
+
+        for stage in range(total_swipes_needed):
             if time_spent >= reading_time or current_position >= page_height:
                 break
 
@@ -258,32 +248,46 @@ def read_chapter_mobile(driver, chapter_url, remaining_time):
 
             # Случайная пауза перед свайпом
             if random.random() < 0.2 and (time_spent - last_action_time) >= min_action_interval:
-                pause = random.uniform(1.5, 3)
+                pause = random.uniform(1, 2)  # Уменьшенная пауза
                 logger.info(f"{Fore.CYAN}Читатель задумался перед свайпом {stage + 1}, пауза: {pause:.1f} сек{Style.RESET_ALL}")
                 time.sleep(pause)
                 time_spent += pause
                 last_action_time = time_spent
 
-            # Свайп вверх через JavaScript
-            swipe_speed = random.uniform(0.3, 0.8)
-            swipe_y_distance = int(swipe_distance)
-            driver.execute_script(f"window.scrollBy(0, {swipe_y_distance});")
+            # Свайп вверх через ActionChains
+            swipe_speed = random.uniform(0.2, 0.5)  # Ускоряем свайпы
+            swipe_y_distance = swipe_distance
+
+            # Перемещаем курсор в центр элемента body
+            actions = ActionChains(driver)
+            actions.move_to_element(body_element).perform()
+
+            # Выполняем свайп
+            actions.click_and_hold() \
+                   .move_by_offset(0, -swipe_y_distance) \
+                   .release() \
+                   .perform()
             current_position += swipe_distance
             if current_position > page_height:
                 current_position = page_height
             time.sleep(swipe_speed)
             time_spent += swipe_speed
-            logger.debug(f"После свайпа вверх: current_position={current_position}, scrollY={driver.execute_script('return window.scrollY')}")
+            logger.debug(f"Свайп {stage + 1}/{total_swipes_needed}: current_position={current_position}, scrollY={driver.execute_script('return window.scrollY')}")
 
             # Случайный свайп назад
             if random.random() < 0.15 and (time_spent - last_action_time) >= min_action_interval:
                 back_swipe = swipe_distance * random.uniform(0.4, 0.8)
                 back_y_distance = int(back_swipe)
-                driver.execute_script(f"window.scrollBy(0, -{back_y_distance});")
+                actions = ActionChains(driver)
+                actions.move_to_element(body_element).perform()
+                actions.click_and_hold() \
+                       .move_by_offset(0, back_y_distance) \
+                       .release() \
+                       .perform()
                 current_position -= back_swipe
                 if current_position < 0:
                     current_position = 0
-                back_time = random.uniform(0.8, 1.5)
+                back_time = random.uniform(0.5, 1.0)  # Уменьшенная пауза
                 logger.info(f"{Fore.CYAN}Свайп назад на {back_swipe:.0f} пикселей, задержка: {back_time:.1f} сек{Style.RESET_ALL}")
                 time.sleep(back_time)
                 time_spent += back_time
@@ -292,7 +296,7 @@ def read_chapter_mobile(driver, chapter_url, remaining_time):
 
             # Пауза (отвлекся)
             if random.random() < 0.15 and (time_spent - last_action_time) >= min_action_interval:
-                pause_time = random.uniform(2, 5)
+                pause_time = random.uniform(1, 3)  # Уменьшенная пауза
                 logger.info(f"{Fore.CYAN}Пауза (отвлекся), задержка: {pause_time:.1f} сек{Style.RESET_ALL}")
                 time.sleep(pause_time)
                 time_spent += pause_time
@@ -323,9 +327,6 @@ def read_chapter_mobile(driver, chapter_url, remaining_time):
     except TimeoutException as e:
         logger.error(f"{Fore.RED}Ошибка при загрузке главы {chapter_url}: {e}{Style.RESET_ALL}")
         return 0
-
-
-
 
 # Переход к следующей главе через кнопку
 def go_to_next_chapter(driver):
@@ -394,12 +395,6 @@ def simulate_session(session_id, use_proxies=USE_PROXIES, visual_mode=VISUAL_MOD
                 transition_time = random.uniform(1, 2)
                 total_time_spent += transition_time
             else:
-                # current_chapter_index = random.choices(available_chapters, weights=[CHAPTER_DISTRIBUTION[i] for i in available_chapters], k=1)[0]
-                # chapter_url = f"{BOOK_URL}/{CHAPTER_IDS[current_chapter_index]}"
-                # driver.get(chapter_url)
-                # transition_time = random.uniform(1, 2)
-                # total_time_spent += transition_time
-                # logger.info(f"{Fore.CYAN}Переход к случайной главе: {chapter_url}{Style.RESET_ALL}")
                 logger.info(f"{Fore.YELLOW}Завершение чтения{Style.RESET_ALL}")
                 break
             
@@ -417,7 +412,6 @@ def simulate_session(session_id, use_proxies=USE_PROXIES, visual_mode=VISUAL_MOD
         delay = random.uniform(*SESSION_DELAY)
         logger.info(f"{Fore.CYAN}Задержка перед следующей сессией: {delay:.1f} сек{Style.RESET_ALL}")
         time.sleep(delay)
-        
 
 # Основная функция
 def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):

@@ -262,17 +262,11 @@ def simulate_session(session_id, use_proxies=USE_PROXIES, visual_mode=VISUAL_MOD
         logger.info(f"{Fore.MAGENTA}Старт сессии {session_id}, планируемая длительность: {session_duration:.1f} сек{Style.RESET_ALL}")
         logger.info(f"{Fore.CYAN}Прочитано глав в текущем цикле: {len(CURRENT_CYCLE_READ_CHAPTERS)} из {TOTAL_CHAPTERS}{Style.RESET_ALL}")
         
+        # Если используем фильтры, идём через страницу книги
         if use_filters:
             if not navigate_through_filters(driver):
                 return
             total_time_spent += random.uniform(1, 5)
-        else:
-            driver.get(BOOK_URL)
-            if not check_cloudflare(driver):
-                return
-            WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-            total_time_spent += random.uniform(1, 3)
-            logger.info(f"{Fore.CYAN}Загружена основная страница: {BOOK_URL}{Style.RESET_ALL}")
         
         # Определяем стартовую главу
         if not CURRENT_CYCLE_READ_CHAPTERS:  # Если ещё ничего не прочитано
@@ -287,6 +281,14 @@ def simulate_session(session_id, use_proxies=USE_PROXIES, visual_mode=VISUAL_MOD
                 break
             
             chapter_url = f"{BOOK_URL}/{CHAPTER_IDS[current_chapter_index]}"
+            if not use_filters:  # Если не использовали фильтры, загружаем главу напрямую
+                driver.get(chapter_url)
+                if not check_cloudflare(driver):
+                    return
+                WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+                total_time_spent += random.uniform(1, 3)
+                logger.info(f"{Fore.CYAN}Загружена страница главы: {chapter_url}{Style.RESET_ALL}")
+            
             reading_time = read_chapter_mobile(driver, chapter_url, remaining_time)
             
             if reading_time > 0:  # Глава прочитана успешно

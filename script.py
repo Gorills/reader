@@ -209,12 +209,15 @@ def read_chapter_mobile(driver, chapter_url, remaining_time):
         stage_duration = reading_time / total_swipes_needed
         body_element = driver.find_element(By.TAG_NAME, "body")
         actions = ActionChains(driver)
+        resource_count = driver.execute_script('return performance.getEntriesByType("resource").length')
+        logger.info(f"Количество сетевых запросов: {resource_count}")
+
         for stage in range(total_swipes_needed):
             if time_spent >= reading_time:
                 break
             if random.random() < 0.3:
                 pause = random.uniform(0.5, 1.5)
-                logger.info(f"{Fore.CYAN}Пауза перед свайпом {stage + 1}: {pause:.1f} сек{Style.RESET_ALL}")
+                # logger.info(f"{Fore.CYAN}Пауза перед свайпом {stage + 1}: {pause:.1f} сек{Style.RESET_ALL}")
                 time.sleep(pause)
                 time_spent += pause
             actions.move_to_element(body_element).click_and_hold().move_by_offset(0, -swipe_distance).release().perform()
@@ -222,6 +225,7 @@ def read_chapter_mobile(driver, chapter_url, remaining_time):
             time.sleep(stage_duration)
             time_spent += stage_duration
         logger.info(f"{Fore.GREEN}Глава прочитана полностью за {time_spent:.1f} секунд{Style.RESET_ALL}")
+        
         return time_spent
     except Exception as e:
         logger.error(f"{Fore.RED}Ошибка при чтении главы {chapter_url}: {e}{Style.RESET_ALL}")
@@ -258,7 +262,6 @@ def simulate_session(session_id, use_proxies=USE_PROXIES, visual_mode=VISUAL_MOD
         logger.info(f"{Fore.MAGENTA}Старт сессии {session_id}, планируемая длительность: {session_duration:.1f} сек{Style.RESET_ALL}")
         logger.info(f"{Fore.CYAN}Прочитано глав в текущем цикле: {len(CURRENT_CYCLE_READ_CHAPTERS)} из {TOTAL_CHAPTERS}{Style.RESET_ALL}")
         
-        # Начало сессии
         if use_filters:
             if not navigate_through_filters(driver):
                 return
@@ -272,50 +275,39 @@ def simulate_session(session_id, use_proxies=USE_PROXIES, visual_mode=VISUAL_MOD
             logger.info(f"{Fore.CYAN}Загружена основная страница: {BOOK_URL}{Style.RESET_ALL}")
         
         # Определяем стартовую главу
-        if not CURRENT_CYCLE_READ_CHAPTERS:  # Если ещё ничего не прочитано в текущем цикле
+        if not CURRENT_CYCLE_READ_CHAPTERS:  # Если ещё ничего не прочитано
             current_chapter_index = random.choices(range(TOTAL_CHAPTERS), weights=CHAPTER_DISTRIBUTION, k=1)[0]
-        else:  # Начинаем с первой непрочитанной главы в текущем цикле
+        else:  # Начинаем с первой непрочитанной главы
             current_chapter_index = min([i for i in range(TOTAL_CHAPTERS) if i not in CURRENT_CYCLE_READ_CHAPTERS])
         
-        chapter_url = f"{BOOK_URL}/{CHAPTER_IDS[current_chapter_index]}"
-        reading_time = read_chapter_mobile(driver, chapter_url, session_duration - total_time_spent)
-        
-        if reading_time > 0:  # Если глава прочитана успешно
-            total_time_spent += reading_time
-            chapters_read_in_session += 1
-            CURRENT_CYCLE_READ_CHAPTERS.add(current_chapter_index)
-        else:
-            logger.warning(f"{Fore.YELLOW}Глава {CHAPTER_IDS[current_chapter_index]} не была прочитана из-за ошибки{Style.RESET_ALL}")
-        
-        # Чтение следующих глав
+        # Читаем текущую главу
         while total_time_spent < session_duration and len(CURRENT_CYCLE_READ_CHAPTERS) < TOTAL_CHAPTERS:
             remaining_time = session_duration - total_time_spent
             if remaining_time < MIN_READING_TIME:
                 break
             
-            next_chapter_index = current_chapter_index + 1
-            if next_chapter_index >= TOTAL_CHAPTERS:
-                break
+            chapter_url = f"{BOOK_URL}/{CHAPTER_IDS[current_chapter_index]}"
+            reading_time = read_chapter_mobile(driver, chapter_url, remaining_time)
             
-            if next_chapter_index in CURRENT_CYCLE_READ_CHAPTERS:  # Пропускаем уже прочитанные главы
-                current_chapter_index = next_chapter_index
-                continue
-            
-            if go_to_next_chapter(driver):
-                current_chapter_index = next_chapter_index
-                chapter_url = driver.current_url
-                total_time_spent += random.uniform(1, 2)
-                reading_time = read_chapter_mobile(driver, chapter_url, remaining_time)
-                if reading_time > 0:
-                    total_time_spent += reading_time
-                    chapters_read_in_session += 1
-                    CURRENT_CYCLE_READ_CHAPTERS.add(current_chapter_index)
+            if reading_time > 0:  # Глава прочитана успешно
+                total_time_spent += reading_time
+                chapters_read_in_session += 1
+                CURRENT_CYCLE_READ_CHAPTERS.add(current_chapter_index)
+                logger.info(f"{Fore.GREEN}Глава {CHAPTER_IDS[current_chapter_index]} прочитана{Style.RESET_ALL}")
+                
+                # Переход к следующей главе только после успешного чтения
+                next_chapter_index = current_chapter_index + 1
+                if next_chapter_index >= TOTAL_CHAPTERS:
+                    break
+                if go_to_next_chapter(driver):
+                    current_chapter_index = next_chapter_index
+                    total_time_spent += random.uniform(1, 2)
                 else:
-                    logger.warning(f"{Fore.YELLOW}Глава {CHAPTER_IDS[current_chapter_index]} не была прочитана из-за ошибки{Style.RESET_ALL}")
+                    logger.info(f"{Fore.YELLOW}Нет следующей главы для чтения{Style.RESET_ALL}")
                     break
             else:
-                logger.info(f"{Fore.YELLOW}Нет следующей главы для чтения{Style.RESET_ALL}")
-                break
+                logger.warning(f"{Fore.YELLOW}Глава {CHAPTER_IDS[current_chapter_index]} не была прочитана из-за ошибки{Style.RESET_ALL}")
+                break  # Прерываем, чтобы следующая сессия начала с этой же главы
         
         logger.info(f"{Fore.MAGENTA}Сессия {session_id} завершена: прочитано {chapters_read_in_session} глав, всего в цикле {len(CURRENT_CYCLE_READ_CHAPTERS)}/{TOTAL_CHAPTERS}{Style.RESET_ALL}")
     except Exception as e:
@@ -326,7 +318,6 @@ def simulate_session(session_id, use_proxies=USE_PROXIES, visual_mode=VISUAL_MOD
         delay = random.uniform(*SESSION_DELAY)
         logger.info(f"{Fore.CYAN}Задержка перед следующей сессией: {delay:.1f} сек{Style.RESET_ALL}")
         time.sleep(delay)
-
 
 
 

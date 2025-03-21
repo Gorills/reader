@@ -250,7 +250,7 @@ def handle_age_verification(driver):
         return False
     
 
-    
+
 def simulate_session(session_id, use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
     global CURRENT_CYCLE_READ_CHAPTERS
     use_filters = random.randint(1, 100) <= FILTER_PERCENTAGE
@@ -383,4 +383,4 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
 
 
 if __name__ == "__main__":
-    simulate_reading(use_proxies=USE_PROXIES, visual_mode=True)
+    simulate_reading(use_proxies=USE_PROXIES, visual_mode=False)

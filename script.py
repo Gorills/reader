@@ -122,26 +122,13 @@ def setup_driver(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE, retries=0):
         screen_height = driver.execute_script("return window.innerHeight")
         driver.set_window_size(screen_width, screen_height + 100)
         logger.info(f"{Fore.CYAN}Размер окна установлен: {screen_width}x{screen_height + 100}{Style.RESET_ALL}")
-        if use_proxies:
-            driver.get(BOOK_URL)
-            WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-            print(f"{Fore.GREEN}Прокси {proxy} успешно подключен{Style.RESET_ALL}")
         logger.info(f"{Fore.CYAN}Выбрано устройство для эмуляции: {mobile_emulation['deviceName']}{Style.RESET_ALL}")
         return driver
     except Exception as e:
         if driver:
             driver.quit()
-        if use_proxies and retries < MAX_PROXY_RETRIES - 1:
-            logger.warning(f"{Fore.YELLOW}Не удалось подключиться через прокси {proxy}: {e}. Повторная попытка...{Style.RESET_ALL}")
-            time.sleep(random.uniform(1, 3))
-            return setup_driver(use_proxies, visual_mode, retries + 1)
-        else:
-            logger.error(f"{Fore.RED}Не удалось настроить драйвер после {MAX_PROXY_RETRIES} попыток: {e}{Style.RESET_ALL}")
-            return None
-    finally:
-        if not visual_mode and os.path.exists(user_data_dir):
-            shutil.rmtree(user_data_dir, ignore_errors=True)
 
+            
 # Проверка на Cloudflare
 def check_cloudflare(driver):
     try:
@@ -192,10 +179,11 @@ def read_chapter_mobile(driver, chapter_url, remaining_time):
     try:
         initial_delay = random.uniform(1.5, 3.5)
         time.sleep(initial_delay)
-        driver.get(chapter_url)
-        if not check_cloudflare(driver):
-            return 0
-        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+        # Убираем driver.get(chapter_url), так как страница уже загружена в simulate_session
+        # if not check_cloudflare(driver):  # Эта проверка уже сделана в цикле
+        #     return 0
+        # WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))  # Это тоже уже сделано
+        
         reading_time = min(random.uniform(MIN_READING_TIME, MAX_READING_TIME), remaining_time)
         logger.info(f"{Fore.YELLOW}Начато чтение главы: {chapter_url}, планируемое время: {reading_time:.1f} сек{Style.RESET_ALL}")
         page_height = driver.execute_script("return document.body.scrollHeight")
@@ -209,15 +197,12 @@ def read_chapter_mobile(driver, chapter_url, remaining_time):
         stage_duration = reading_time / total_swipes_needed
         body_element = driver.find_element(By.TAG_NAME, "body")
         actions = ActionChains(driver)
-        resource_count = driver.execute_script('return performance.getEntriesByType("resource").length')
-        logger.info(f"Количество сетевых запросов: {resource_count}")
-
         for stage in range(total_swipes_needed):
             if time_spent >= reading_time:
                 break
             if random.random() < 0.3:
                 pause = random.uniform(0.5, 1.5)
-                # logger.info(f"{Fore.CYAN}Пауза перед свайпом {stage + 1}: {pause:.1f} сек{Style.RESET_ALL}")
+                logger.info(f"{Fore.CYAN}Пауза перед свайпом {stage + 1}: {pause:.1f} сек{Style.RESET_ALL}")
                 time.sleep(pause)
                 time_spent += pause
             actions.move_to_element(body_element).click_and_hold().move_by_offset(0, -swipe_distance).release().perform()
@@ -225,7 +210,6 @@ def read_chapter_mobile(driver, chapter_url, remaining_time):
             time.sleep(stage_duration)
             time_spent += stage_duration
         logger.info(f"{Fore.GREEN}Глава прочитана полностью за {time_spent:.1f} секунд{Style.RESET_ALL}")
-        
         return time_spent
     except Exception as e:
         logger.error(f"{Fore.RED}Ошибка при чтении главы {chapter_url}: {e}{Style.RESET_ALL}")
@@ -373,4 +357,4 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
 
 
 if __name__ == "__main__":
-    simulate_reading(use_proxies=USE_PROXIES, visual_mode=False)
+    simulate_reading(use_proxies=USE_PROXIES, visual_mode=True)

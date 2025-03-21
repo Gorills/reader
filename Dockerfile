@@ -1,27 +1,34 @@
-# Используем базовый образ с Python
-FROM python:3.11-slim
+# Используем официальный образ Python
+FROM python:3.9-slim
 
-# Установка зависимостей для Chrome и undetected_chromedriver
+# Устанавливаем рабочую директорию
+WORKDIR /app
+
+# Копируем зависимости и скрипт
+COPY requirements.txt .
+COPY script.py .
+
+# Устанавливаем зависимости Python
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Устанавливаем необходимые системные пакеты (включая gnupg для работы с ключами)
 RUN apt-get update && apt-get install -y \
     wget \
-    gnupg \
     unzip \
-    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
+    curl \
+    gnupg \
+    libglib2.0-0 \
+    libnss3 \
+    libgconf-2-4 \
+    libfontconfig1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Устанавливаем ключ и репозиторий Google Chrome, затем устанавливаем Chrome
+RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
     && echo "deb http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update \
     && apt-get install -y google-chrome-stable \
-    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Установка Python-зависимостей
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Копирование скрипта
-COPY script.py /app/script.py
-
-# Установка рабочей директории
-WORKDIR /app
-
-# Запуск скрипта с аргументами
-CMD ["python", "script.py", "--session-id", "0", "--use-proxies", "--visual-mode"]
+# Указываем команду для запуска скрипта
+CMD ["python", "script.py"]

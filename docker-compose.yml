@@ -1,0 +1,9 @@
+version: '3.8'
+
+services:
+  reader:
+    build: .
+    environment:
+      - PYTHONUNBUFFERED=1  # Для вывода логов в реальном времени
+    volumes:
+      - .:/app  # Для горячей перезагрузки кода (опционально)

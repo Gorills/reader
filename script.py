@@ -128,7 +128,7 @@ def setup_driver(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE, retries=0):
         if driver:
             driver.quit()
 
-            
+
 # Проверка на Cloudflare
 def check_cloudflare(driver):
     try:
@@ -228,21 +228,43 @@ def go_to_next_chapter(driver):
     except TimeoutException as e:
         logger.warning(f"{Fore.YELLOW}Кнопка следующей главы не найдена: {e}{Style.RESET_ALL}")
         return False
+    
 
-# Одна сессия чтения с учётом непрочитанных глав в текущем цикле
+def handle_age_verification(driver):
+    try:
+        # Проверяем наличие кнопки "Да, мне есть 18"
+        age_button = WebDriverWait(driver, 5).until(
+            EC.element_to_be_clickable((By.XPATH, "//a[@data-bind='click: setAdultCookie' and contains(text(), 'Да, мне есть 18')]"))
+        )
+        logger.info(f"{Fore.CYAN}Обнаружена кнопка подтверждения возраста{Style.RESET_ALL}")
+        age_button.click()
+        logger.info(f"{Fore.GREEN}Кнопка 'Да, мне есть 18' нажата{Style.RESET_ALL}")
+        # Ждём, пока страница обновится после нажатия (если требуется)
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+        return True
+    except TimeoutException:
+        logger.info(f"{Fore.GREEN}Кнопка подтверждения возраста не обнаружена, продолжаем без нажатия{Style.RESET_ALL}")
+        return False
+    except Exception as e:
+        logger.error(f"{Fore.RED}Ошибка при обработке кнопки возраста: {e}{Style.RESET_ALL}")
+        return False
+    
+
+    
 def simulate_session(session_id, use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
     global CURRENT_CYCLE_READ_CHAPTERS
     use_filters = random.randint(1, 100) <= FILTER_PERCENTAGE
     session_duration = random.uniform(MIN_SESSION_TIME, MAX_SESSION_TIME)
-    driver = setup_driver(use_proxies=use_proxies, visual_mode=visual_mode)
-    if not driver:
-        logger.error(f"{Fore.RED}Сессия {session_id} не запущена из-за проблем с драйвером{Style.RESET_ALL}")
-        return
-    
-    total_time_spent = 0
-    chapters_read_in_session = 0
-    
+    driver = None  # Инициализируем driver как None
     try:
+        driver = setup_driver(use_proxies=use_proxies, visual_mode=visual_mode)
+        if not driver:
+            logger.error(f"{Fore.RED}Сессия {session_id} не запущена из-за проблем с драйвером{Style.RESET_ALL}")
+            return
+        
+        total_time_spent = 0
+        chapters_read_in_session = 0
+        
         logger.info(f"{Fore.MAGENTA}Старт сессии {session_id}, планируемая длительность: {session_duration:.1f} сек{Style.RESET_ALL}")
         logger.info(f"{Fore.CYAN}Прочитано глав в текущем цикле: {len(CURRENT_CYCLE_READ_CHAPTERS)} из {TOTAL_CHAPTERS}{Style.RESET_ALL}")
         
@@ -270,6 +292,11 @@ def simulate_session(session_id, use_proxies=USE_PROXIES, visual_mode=VISUAL_MOD
                 if not check_cloudflare(driver):
                     return
                 WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+                
+                # Проверяем и нажимаем кнопку подтверждения возраста
+                if handle_age_verification(driver):
+                    total_time_spent += random.uniform(1, 3)  # Учитываем время на нажатие
+                
                 total_time_spent += random.uniform(1, 3)
                 logger.info(f"{Fore.CYAN}Загружена страница главы: {chapter_url}{Style.RESET_ALL}")
             
@@ -299,12 +326,11 @@ def simulate_session(session_id, use_proxies=USE_PROXIES, visual_mode=VISUAL_MOD
     except Exception as e:
         logger.error(f"{Fore.RED}Ошибка в сессии {session_id}: {e}{Style.RESET_ALL}")
     finally:
-        if driver:
+        if driver is not None:  # Безопасно закрываем драйвер
             driver.quit()
         delay = random.uniform(*SESSION_DELAY)
         logger.info(f"{Fore.CYAN}Задержка перед следующей сессией: {delay:.1f} сек{Style.RESET_ALL}")
         time.sleep(delay)
-
 
 
 # Основная функция с повторением и обновлением прокси

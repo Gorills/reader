@@ -14,6 +14,7 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.chrome.options import Options
 import tempfile
 import os
+import shutil
 
 # Инициализация colorama для цветного вывода в консоли
 init()
@@ -39,24 +40,27 @@ def get_proxy_list():
         return []
 
 # Конфигурация
-BOOK_URL = "https://author.today/reader/325682"  # Ссылка на книгу
+BOOK_ID = 325682
+BOOK_URL = f"https://author.today/reader/{BOOK_ID}"  # Ссылка на книгу
 TOTAL_CHAPTERS = 16  # Количество глав
 CHAPTER_IDS = [2974946, 2976373, 2979598, 2981670, 2983586, 2985569, 2987502, 2989643, 2991521, 2993718, 2995380, 2997329, 2999595, 3001372, 3003266, 3005314]  # Список ID глав
 TOTAL_SESSIONS = 1  # Количество сессий за один цикл чтения
 REPEAT_COUNT = 5000  # Количество раз, которые нужно перезапустить чтение книги
-CHAPTER_DISTRIBUTION = [80, 10, 5, 3, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  # Вероятности выбора глав
+CHAPTER_DISTRIBUTION = [80, 10, 5, 3, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  # Вероятности выбора глав (для первой сессии)
 FILTER_PERCENTAGE = 0  # Процент сессий с переходом через фильтры
 MIN_READING_TIME = 180  # Минимальное время чтения одной главы (в секундах)
 MAX_READING_TIME = 360  # Максимальное время чтения одной главы (в секундах)
-MIN_SESSION_TIME = 1800  # Минимальное время сессии (5 минут в секундах)
+MIN_SESSION_TIME = 1800  # Минимальное время сессии (30 минут в секундах)
 MAX_SESSION_TIME = 2400  # Максимальное время сессии (40 минут в секундах)
 MAX_WORKERS_DEFAULT = 1  # Количество параллельных сессий по умолчанию
 USE_PROXIES = True  # Использовать прокси (True) или нет (False)
 PROXY_LIST = []  # Изначально пустой список прокси, будет обновляться перед каждым циклом
-
 VISUAL_MODE = False  # True - видимый браузер и одна сессия, False - скрытый режим и консоль
 SESSION_DELAY = (5, 10)  # Диапазон задержки между сессиями (в секундах)
 MAX_PROXY_RETRIES = 3
+
+# Глобальное состояние для отслеживания прочитанных глав в текущем цикле
+CURRENT_CYCLE_READ_CHAPTERS = set()  # Множество успешно прочитанных глав в текущем цикле
 
 # Установка MAX_WORKERS в зависимости от VISUAL_MODE
 MAX_WORKERS = 1 if VISUAL_MODE else MAX_WORKERS_DEFAULT
@@ -89,23 +93,13 @@ user_agents = [
 ]
 
 # Настройка драйвера (мобильный режим)
-# Настройка драйвера (мобильный режим)
 def setup_driver(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE, retries=0):
     chrome_options = Options()
-    
-    # Создаем уникальную временную директорию для профиля Chrome
     user_data_dir = tempfile.mkdtemp(prefix="chrome_profile_")
     chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
-    
-    # Список валидных устройств для mobileEmulation
-    mobile_devices = [
-        "iPhone X", "iPhone 8", "iPhone 6", "Pixel 2", "Pixel 2 XL", "Galaxy S5", "iPad", "Nexus 5X"
-    ]
-    
-    # Настройка мобильной эмуляции
+    mobile_devices = ["iPhone X", "iPhone 8", "iPhone 6", "Pixel 2", "Pixel 2 XL", "Galaxy S5", "iPad", "Nexus 5X"]
     mobile_emulation = {"deviceName": random.choice(mobile_devices)}
     chrome_options.add_experimental_option("mobileEmulation", mobile_emulation)
-
     if not visual_mode:
         chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
@@ -114,33 +108,24 @@ def setup_driver(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE, retries=0):
     user_agent = random.choice(user_agents)
     chrome_options.add_argument(f"user-agent={user_agent}")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-
-    driver = None
     proxy = None
-    
     if use_proxies and PROXY_LIST:
         proxy = random.choice(PROXY_LIST)
         chrome_options.add_argument(f'--proxy-server={proxy}')
         print(f"{Fore.CYAN}Попытка использовать прокси: {proxy} (попытка {retries + 1}/{MAX_PROXY_RETRIES}){Style.RESET_ALL}")
     else:
         print(f"{Fore.CYAN}Прокси не используются{Style.RESET_ALL}")
-
     try:
         driver = webdriver.Chrome(options=chrome_options)
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        
-        # Устанавливаем размер окна равным эмулируемому устройству
         screen_width = driver.execute_script("return window.innerWidth")
         screen_height = driver.execute_script("return window.innerHeight")
         driver.set_window_size(screen_width, screen_height + 100)
         logger.info(f"{Fore.CYAN}Размер окна установлен: {screen_width}x{screen_height + 100}{Style.RESET_ALL}")
-        logger.info(f"{Fore.CYAN}Эмулируемый размер: {screen_width}x{screen_height}{Style.RESET_ALL}")
-        
         if use_proxies:
             driver.get(BOOK_URL)
             WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
             print(f"{Fore.GREEN}Прокси {proxy} успешно подключен{Style.RESET_ALL}")
-        
         logger.info(f"{Fore.CYAN}Выбрано устройство для эмуляции: {mobile_emulation['deviceName']}{Style.RESET_ALL}")
         return driver
     except Exception as e:
@@ -154,9 +139,7 @@ def setup_driver(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE, retries=0):
             logger.error(f"{Fore.RED}Не удалось настроить драйвер после {MAX_PROXY_RETRIES} попыток: {e}{Style.RESET_ALL}")
             return None
     finally:
-        # Удаляем временную директорию после завершения (опционально)
         if not visual_mode and os.path.exists(user_data_dir):
-            import shutil
             shutil.rmtree(user_data_dir, ignore_errors=True)
 
 # Проверка на Cloudflare
@@ -170,10 +153,7 @@ def check_cloudflare(driver):
         time.sleep(random.uniform(1, 3))
         driver.execute_script("window.scrollTo(0, 0);")
         time.sleep(random.uniform(1, 3))
-        
-        WebDriverWait(driver, 120).until(
-            EC.presence_of_element_located((By.TAG_NAME, "body"))
-        )
+        WebDriverWait(driver, 120).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         if "Проверка" in driver.page_source:
             logger.error(f"{Fore.RED}Не удалось пройти проверку Cloudflare{Style.RESET_ALL}")
             return False
@@ -185,85 +165,66 @@ def check_cloudflare(driver):
 # Имитация перехода через фильтры
 def navigate_through_filters(driver):
     try:
-        driver.get("https://author.today/works")
+        book_url = f"https://author.today/work/{BOOK_ID}"
+        driver.get(book_url)
         if not check_cloudflare(driver):
+            logger.warning(f"{Fore.YELLOW}Обнаружена проблема с Cloudflare на {book_url}{Style.RESET_ALL}")
             return False
         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-        filter_button = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH, "//a[contains(text(), 'Фэнтези')]"))
+        logger.info(f"{Fore.CYAN}Страница книги {book_url} успешно загружена{Style.RESET_ALL}")
+        read_book_button = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, f"//a[contains(@class, 'btn-read-work') and @href='/reader/{BOOK_ID}']"))
         )
-        filter_button.click()
+        read_book_button.click()
+        logger.info(f"{Fore.GREEN}Клик по кнопке 'Читать книгу' выполнен для книги {BOOK_ID}{Style.RESET_ALL}")
         time.sleep(random.uniform(1, 3))
-        book_link = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH, "//a[@href='/reader/89419']"))
-        )
-        book_link.click()
-        logger.info(f"{Fore.GREEN}Переход через фильтры выполнен{Style.RESET_ALL}")
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+        logger.info(f"{Fore.GREEN}Переход через фильтры выполнен, загружена страница читалки{Style.RESET_ALL}")
+        return True
     except TimeoutException as e:
-        logger.error(f"{Fore.RED}Ошибка при переходе через фильтры: {e}{Style.RESET_ALL}")
+        logger.error(f"{Fore.RED}Таймаут при переходе через фильтры для книги {BOOK_ID}: {e}{Style.RESET_ALL}")
         return False
-    return True
+    except Exception as e:
+        logger.error(f"{Fore.RED}Неизвестная ошибка при выполнении перехода для книги {BOOK_ID}: {e}{Style.RESET_ALL}")
+        return False
 
 def read_chapter_mobile(driver, chapter_url, remaining_time):
     try:
-        # Задержка перед загрузкой страницы
         initial_delay = random.uniform(1.5, 3.5)
         time.sleep(initial_delay)
-
         driver.get(chapter_url)
-        
         if not check_cloudflare(driver):
             return 0
-        
         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-
         reading_time = min(random.uniform(MIN_READING_TIME, MAX_READING_TIME), remaining_time)
-        logger.info(f"{Fore.YELLOW}Начато чтение главы на мобильном: {chapter_url}, планируемое время: {reading_time:.1f} сек{Style.RESET_ALL}")
-
-        # Получаем размеры экрана и страницы
+        logger.info(f"{Fore.YELLOW}Начато чтение главы: {chapter_url}, планируемое время: {reading_time:.1f} сек{Style.RESET_ALL}")
         page_height = driver.execute_script("return document.body.scrollHeight")
         screen_height = driver.execute_script("return window.innerHeight")
         current_position = 0
         time_spent = initial_delay
-
-        # Рассчитываем количество свайпов, чтобы покрыть время чтения, а не страницу
-        min_swipes = int(reading_time / 2)  # Минимальное количество свайпов (1 свайп каждые ~2 сек)
-        max_swipes = int(reading_time / 1.5)  # Максимальное (чаще свайпы)
+        min_swipes = int(reading_time / 2)
+        max_swipes = int(reading_time / 1.5)
         total_swipes_needed = random.randint(min_swipes, max_swipes)
-
-        # Шаг свайпа (адаптируем к количеству свайпов)
-        swipe_distance = max(80, page_height // total_swipes_needed)  # Минимум 50px, чтобы были движения
-
-        stage_duration = reading_time / total_swipes_needed  # Время между свайпами
-        min_action_interval = 1.0  # Минимальная задержка между свайпами
-
+        swipe_distance = max(80, page_height // total_swipes_needed)
+        stage_duration = reading_time / total_swipes_needed
         body_element = driver.find_element(By.TAG_NAME, "body")
         actions = ActionChains(driver)
-
         for stage in range(total_swipes_needed):
             if time_spent >= reading_time:
                 break
-
-            # Добавляем случайную паузу перед свайпом (имитация "обдумывания")
-            if random.random() < 0.3:  # 30% шанс, что перед свайпом будет пауза
-                pause = random.uniform(0.5, 1.5)  # Короткие остановки
-                logger.info(f"{Fore.CYAN}Читатель задумался перед свайпом {stage + 1}, пауза: {pause:.1f} сек{Style.RESET_ALL}")
+            if random.random() < 0.3:
+                pause = random.uniform(0.5, 1.5)
+                logger.info(f"{Fore.CYAN}Пауза перед свайпом {stage + 1}: {pause:.1f} сек{Style.RESET_ALL}")
                 time.sleep(pause)
                 time_spent += pause
-
-            # Выполняем свайп
-            swipe_speed = random.uniform(0.3, 0.6)  # Плавные движения
             actions.move_to_element(body_element).click_and_hold().move_by_offset(0, -swipe_distance).release().perform()
-
             current_position += swipe_distance
-            time.sleep(stage_duration)  # Ждем перед следующим свайпом
+            time.sleep(stage_duration)
             time_spent += stage_duration
-
-        logger.info(f"{Fore.GREEN}Глава прочитана полностью за {time_spent:.1f} секунд.{Style.RESET_ALL}")
+        logger.info(f"{Fore.GREEN}Глава прочитана полностью за {time_spent:.1f} секунд{Style.RESET_ALL}")
         return time_spent
-
     except Exception as e:
-        logger.error(f"{Fore.RED}Ошибка при чтении главы: {str(e)}{Style.RESET_ALL}")
+        logger.error(f"{Fore.RED}Ошибка при чтении главы {chapter_url}: {e}{Style.RESET_ALL}")
         return 0
 
 # Переход к следующей главе через кнопку
@@ -274,14 +235,15 @@ def go_to_next_chapter(driver):
         )
         next_chapter_button.click()
         time.sleep(random.uniform(1, 2))
-        logger.info(f"{Fore.GREEN}Переход к следующей главе выполнен через кнопку{Style.RESET_ALL}")
+        logger.info(f"{Fore.GREEN}Переход к следующей главе выполнен{Style.RESET_ALL}")
         return True
     except TimeoutException as e:
         logger.warning(f"{Fore.YELLOW}Кнопка следующей главы не найдена: {e}{Style.RESET_ALL}")
         return False
 
-# Одна сессия чтения
+# Одна сессия чтения с учётом непрочитанных глав в текущем цикле
 def simulate_session(session_id, use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
+    global CURRENT_CYCLE_READ_CHAPTERS
     use_filters = random.randint(1, 100) <= FILTER_PERCENTAGE
     session_duration = random.uniform(MIN_SESSION_TIME, MAX_SESSION_TIME)
     driver = setup_driver(use_proxies=use_proxies, visual_mode=visual_mode)
@@ -290,18 +252,17 @@ def simulate_session(session_id, use_proxies=USE_PROXIES, visual_mode=VISUAL_MOD
         return
     
     total_time_spent = 0
-    chapters_read = 0
-    read_chapters = set()
-    current_chapter_index = None
+    chapters_read_in_session = 0
     
     try:
         logger.info(f"{Fore.MAGENTA}Старт сессии {session_id}, планируемая длительность: {session_duration:.1f} сек{Style.RESET_ALL}")
+        logger.info(f"{Fore.CYAN}Прочитано глав в текущем цикле: {len(CURRENT_CYCLE_READ_CHAPTERS)} из {TOTAL_CHAPTERS}{Style.RESET_ALL}")
         
+        # Начало сессии
         if use_filters:
             if not navigate_through_filters(driver):
                 return
-            navigation_time = random.uniform(1, 5)
-            total_time_spent += navigation_time
+            total_time_spent += random.uniform(1, 5)
         else:
             driver.get(BOOK_URL)
             if not check_cloudflare(driver):
@@ -310,38 +271,53 @@ def simulate_session(session_id, use_proxies=USE_PROXIES, visual_mode=VISUAL_MOD
             total_time_spent += random.uniform(1, 3)
             logger.info(f"{Fore.CYAN}Загружена основная страница: {BOOK_URL}{Style.RESET_ALL}")
         
-        current_chapter_index = random.choices(range(TOTAL_CHAPTERS), weights=CHAPTER_DISTRIBUTION, k=1)[0]
+        # Определяем стартовую главу
+        if not CURRENT_CYCLE_READ_CHAPTERS:  # Если ещё ничего не прочитано в текущем цикле
+            current_chapter_index = random.choices(range(TOTAL_CHAPTERS), weights=CHAPTER_DISTRIBUTION, k=1)[0]
+        else:  # Начинаем с первой непрочитанной главы в текущем цикле
+            current_chapter_index = min([i for i in range(TOTAL_CHAPTERS) if i not in CURRENT_CYCLE_READ_CHAPTERS])
+        
         chapter_url = f"{BOOK_URL}/{CHAPTER_IDS[current_chapter_index]}"
         reading_time = read_chapter_mobile(driver, chapter_url, session_duration - total_time_spent)
-        total_time_spent += reading_time
-        chapters_read += 1
-        read_chapters.add(current_chapter_index)
         
-        while total_time_spent < session_duration and chapters_read < TOTAL_CHAPTERS:
+        if reading_time > 0:  # Если глава прочитана успешно
+            total_time_spent += reading_time
+            chapters_read_in_session += 1
+            CURRENT_CYCLE_READ_CHAPTERS.add(current_chapter_index)
+        else:
+            logger.warning(f"{Fore.YELLOW}Глава {CHAPTER_IDS[current_chapter_index]} не была прочитана из-за ошибки{Style.RESET_ALL}")
+        
+        # Чтение следующих глав
+        while total_time_spent < session_duration and len(CURRENT_CYCLE_READ_CHAPTERS) < TOTAL_CHAPTERS:
             remaining_time = session_duration - total_time_spent
             if remaining_time < MIN_READING_TIME:
                 break
             
-            available_chapters = [i for i in range(TOTAL_CHAPTERS) if i not in read_chapters]
-            if not available_chapters:
+            next_chapter_index = current_chapter_index + 1
+            if next_chapter_index >= TOTAL_CHAPTERS:
                 break
             
-            next_chapter_index = current_chapter_index + 1 if current_chapter_index < TOTAL_CHAPTERS - 1 else None
-            if next_chapter_index in available_chapters and go_to_next_chapter(driver):
+            if next_chapter_index in CURRENT_CYCLE_READ_CHAPTERS:  # Пропускаем уже прочитанные главы
+                current_chapter_index = next_chapter_index
+                continue
+            
+            if go_to_next_chapter(driver):
                 current_chapter_index = next_chapter_index
                 chapter_url = driver.current_url
-                transition_time = random.uniform(1, 2)
-                total_time_spent += transition_time
+                total_time_spent += random.uniform(1, 2)
+                reading_time = read_chapter_mobile(driver, chapter_url, remaining_time)
+                if reading_time > 0:
+                    total_time_spent += reading_time
+                    chapters_read_in_session += 1
+                    CURRENT_CYCLE_READ_CHAPTERS.add(current_chapter_index)
+                else:
+                    logger.warning(f"{Fore.YELLOW}Глава {CHAPTER_IDS[current_chapter_index]} не была прочитана из-за ошибки{Style.RESET_ALL}")
+                    break
             else:
-                logger.info(f"{Fore.YELLOW}Завершение чтения{Style.RESET_ALL}")
+                logger.info(f"{Fore.YELLOW}Нет следующей главы для чтения{Style.RESET_ALL}")
                 break
-            
-            reading_time = read_chapter_mobile(driver, chapter_url, remaining_time)
-            total_time_spent += reading_time
-            chapters_read += 1
-            read_chapters.add(current_chapter_index)
         
-        logger.info(f"{Fore.MAGENTA}Сессия {session_id} завершена: прочитано {chapters_read} глав, время: {total_time_spent:.1f} сек (план: {session_duration:.1f} сек){Style.RESET_ALL}")
+        logger.info(f"{Fore.MAGENTA}Сессия {session_id} завершена: прочитано {chapters_read_in_session} глав, всего в цикле {len(CURRENT_CYCLE_READ_CHAPTERS)}/{TOTAL_CHAPTERS}{Style.RESET_ALL}")
     except Exception as e:
         logger.error(f"{Fore.RED}Ошибка в сессии {session_id}: {e}{Style.RESET_ALL}")
     finally:
@@ -353,6 +329,7 @@ def simulate_session(session_id, use_proxies=USE_PROXIES, visual_mode=VISUAL_MOD
 
 # Основная функция с повторением и обновлением прокси
 def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
+    global CURRENT_CYCLE_READ_CHAPTERS
     logger.info(f"{Fore.BLUE}Запуск имитации чтения книги: {BOOK_URL}{Style.RESET_ALL}")
     logger.info(f"{Fore.BLUE}Всего сессий за цикл: {TOTAL_SESSIONS}, глав: {TOTAL_CHAPTERS}, через фильтры: {FILTER_PERCENTAGE}%{Style.RESET_ALL}")
     logger.info(f"{Fore.BLUE}Вероятности выбора глав: {CHAPTER_DISTRIBUTION}{Style.RESET_ALL}")
@@ -361,10 +338,11 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
     logger.info(f"{Fore.BLUE}Длительность сессий: от {MIN_SESSION_TIME} до {MAX_SESSION_TIME} сек{Style.RESET_ALL}")
     logger.info(f"{Fore.BLUE}Использование прокси: {'Да' if use_proxies else 'Нет'}{Style.RESET_ALL}")
     logger.info(f"{Fore.BLUE}Визуальный режим: {'Включен' if visual_mode else 'Выключен'} (MAX_WORKERS: {MAX_WORKERS}){Style.RESET_ALL}")
-    logger.info(f"{Fore.BLUE}Количество повторений чтения книги: {REPEAT_COUNT}{Style.RESET_ALL}")
+    logger.info(f"{Fore.BLUE}Количество повторений: {REPEAT_COUNT}{Style.RESET_ALL}")
 
     for repeat in range(REPEAT_COUNT + 1):  # +1, чтобы учесть первый цикл
-        # Обновляем список прокси перед каждым циклом
+        CURRENT_CYCLE_READ_CHAPTERS = set()  # Сбрасываем прочитанные главы перед каждым циклом
+        
         if use_proxies:
             global PROXY_LIST
             PROXY_LIST = get_proxy_list()
@@ -384,10 +362,16 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
                     future.result()
                 except Exception as e:
                     logger.error(f"{Fore.RED}Ошибка в потоке: {e}{Style.RESET_ALL}")
+        
+        if len(CURRENT_CYCLE_READ_CHAPTERS) == TOTAL_CHAPTERS:
+            logger.info(f"{Fore.GREEN}Книга прочитана полностью в цикле {repeat + 1}{Style.RESET_ALL}")
+        else:
+            logger.warning(f"{Fore.YELLOW}Книга не прочитана полностью в цикле {repeat + 1} ({len(CURRENT_CYCLE_READ_CHAPTERS)}/{TOTAL_CHAPTERS}){Style.RESET_ALL}")
+        
         if repeat < REPEAT_COUNT:
-            logger.info(f"{Fore.CYAN}Книга прочитана, перезапуск чтения...{Style.RESET_ALL}")
-            time.sleep(random.uniform(10, 20))  # Задержка перед следующим циклом чтения
-
+            logger.info(f"{Fore.CYAN}Перезапуск чтения книги...{Style.RESET_ALL}")
+            time.sleep(random.uniform(10, 20))  # Задержка перед следующим циклом
+    
     logger.info(f"{Fore.BLUE}Чтение книги завершено после {REPEAT_COUNT + 1} циклов{Style.RESET_ALL}")
 
 if __name__ == "__main__":

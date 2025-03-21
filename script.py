@@ -327,6 +327,9 @@ def simulate_session(session_id, use_proxies=USE_PROXIES, visual_mode=VISUAL_MOD
         logger.info(f"{Fore.CYAN}Задержка перед следующей сессией: {delay:.1f} сек{Style.RESET_ALL}")
         time.sleep(delay)
 
+
+
+
 # Основная функция с повторением и обновлением прокси
 def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
     global CURRENT_CYCLE_READ_CHAPTERS
@@ -340,9 +343,7 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
     logger.info(f"{Fore.BLUE}Визуальный режим: {'Включен' if visual_mode else 'Выключен'} (MAX_WORKERS: {MAX_WORKERS}){Style.RESET_ALL}")
     logger.info(f"{Fore.BLUE}Количество повторений: {REPEAT_COUNT}{Style.RESET_ALL}")
 
-    for repeat in range(REPEAT_COUNT + 1):  # +1, чтобы учесть первый цикл
-        CURRENT_CYCLE_READ_CHAPTERS = set()  # Сбрасываем прочитанные главы перед каждым циклом
-        
+    for repeat in range(REPEAT_COUNT + 1):
         if use_proxies:
             global PROXY_LIST
             PROXY_LIST = get_proxy_list()
@@ -365,14 +366,18 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
         
         if len(CURRENT_CYCLE_READ_CHAPTERS) == TOTAL_CHAPTERS:
             logger.info(f"{Fore.GREEN}Книга прочитана полностью в цикле {repeat + 1}{Style.RESET_ALL}")
+            CURRENT_CYCLE_READ_CHAPTERS = set()  # Сбрасываем только после полного прочтения
         else:
             logger.warning(f"{Fore.YELLOW}Книга не прочитана полностью в цикле {repeat + 1} ({len(CURRENT_CYCLE_READ_CHAPTERS)}/{TOTAL_CHAPTERS}){Style.RESET_ALL}")
         
         if repeat < REPEAT_COUNT:
-            logger.info(f"{Fore.CYAN}Перезапуск чтения книги...{Style.RESET_ALL}")
-            time.sleep(random.uniform(10, 20))  # Задержка перед следующим циклом
+            logger.info(f"{Fore.CYAN}Перезапуск цикла чтения...{Style.RESET_ALL}")
+            time.sleep(random.uniform(10, 20))
     
     logger.info(f"{Fore.BLUE}Чтение книги завершено после {REPEAT_COUNT + 1} циклов{Style.RESET_ALL}")
+
+
+
 
 if __name__ == "__main__":
     simulate_reading(use_proxies=USE_PROXIES, visual_mode=False)

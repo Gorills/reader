@@ -61,24 +61,22 @@ def fetch_books_data():
 
 # Функция для получения или создания воркера
 def get_or_create_worker():
+    """Получение уникального свободного воркера через атомарный API-метод."""
     try:
-        response = requests.get(WORKERS_ENDPOINT, timeout=10)
+        response = requests.get(f"{WORKERS_ENDPOINT}assign/", timeout=10)
         response.raise_for_status()
-        workers = response.json()
-        free_worker = next((w for w in workers if not w["active"] and not w["busy"]), None)
+        worker = response.json()
         
-        if free_worker:
-            logger.info(f"{Fore.GREEN}Найден свободный воркер с ID: {free_worker['id']}, book: {free_worker['book']}{Style.RESET_ALL}")
-            update_worker(free_worker["id"], active=False, busy=True)  # Устанавливаем busy=True
-            return free_worker  # Возвращаем весь объект воркера
+        if worker and "id" in worker:
+            logger.info(f"{Fore.GREEN}Успешно зарезервирован воркер {worker['id']} с книгой: {worker['book']}{Style.RESET_ALL}")
+            return worker
         else:
-            logger.warning(f"{Fore.YELLOW}Нет свободных воркеров{Style.RESET_ALL}")
+            logger.warning(f"{Fore.YELLOW}Сервер не вернул свободного воркера{Style.RESET_ALL}")
             return None
-        
+            
     except requests.RequestException as e:
-        logger.error(f"{Fore.RED}Ошибка при получении воркера: {e}{Style.RESET_ALL}")
+        logger.error(f"{Fore.RED}Ошибка при запросе воркера через /assign/: {e}{Style.RESET_ALL}")
         return None
-
 
 
 # Функция для обновления статуса воркера

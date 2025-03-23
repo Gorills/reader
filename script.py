@@ -23,6 +23,148 @@ init()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+# URL API для получения данных
+API_URL = "https://book.profit-platform.ru/api/v1/"
+BOOKS_ENDPOINT = f"{API_URL}books/"
+CHAPTERS_ENDPOINT = f"{API_URL}chapters/"
+WORKERS_ENDPOINT = f"{API_URL}workers/"
+
+# API-ключ (должен совпадать с тем, что в permissions.py)
+API_KEY = "pofUhvArCD!InqR/ihbp10t!4nLDixpV0JKIpSRu3L!tynylcf7soKtZU6c"  # Замените на тот же ключ, что в permissions.py
+HEADERS = {
+    "X-API-Key": API_KEY,
+    "Content-Type": "application/json"
+}
+
+
+
+USE_PROXIES = True  # Использовать прокси (True) или нет (False)
+PROXY_LIST = []  # Изначально пустой список прокси, будет обновляться перед каждым циклом
+VISUAL_MODE = False  # True - видимый браузер и одна сессия, False - скрытый режим и консоль
+SESSION_DELAY = (5, 10)  # Диапазон задержки между сессиями (в секундах)
+MAX_PROXY_RETRIES = 3
+
+
+
+# Функция для получения данных о книгах из API
+def fetch_books_data():
+    try:
+        response = requests.get(BOOKS_ENDPOINT, timeout=10)  # GET доступен всем
+        response.raise_for_status()
+        books = response.json()
+        logger.info(f"{Fore.GREEN}Получены данные о {len(books)} книгах из API{Style.RESET_ALL}")
+        return books
+    except requests.RequestException as e:
+        logger.error(f"{Fore.RED}Ошибка при загрузке данных из API: {e}{Style.RESET_ALL}")
+        return []
+
+# Функция для получения или создания воркера
+def get_or_create_worker():
+    try:
+        response = requests.get(WORKERS_ENDPOINT, timeout=10)
+        response.raise_for_status()
+        workers = response.json()
+        free_worker = next((w for w in workers if not w["active"] and not w["busy"]), None)
+        
+        if free_worker:
+            logger.info(f"{Fore.GREEN}Найден свободный воркер с ID: {free_worker['id']}, book: {free_worker['book']}{Style.RESET_ALL}")
+            update_worker(free_worker["id"], active=False, busy=True)  # Устанавливаем busy=True
+            return free_worker  # Возвращаем весь объект воркера
+        else:
+            logger.warning(f"{Fore.YELLOW}Нет свободных воркеров{Style.RESET_ALL}")
+            return None
+        
+    except requests.RequestException as e:
+        logger.error(f"{Fore.RED}Ошибка при получении воркера: {e}{Style.RESET_ALL}")
+        return None
+
+
+
+# Функция для обновления статуса воркера
+def update_worker(worker_id, active, busy):
+    try:
+        url = f"{WORKERS_ENDPOINT}{worker_id}/"
+        data = {"busy": busy, "active": active}
+        logger.info(f"Обновляем воркер {worker_id}: busy={busy}")
+        response = requests.patch(url, json=data, headers=HEADERS, timeout=10)
+        response.raise_for_status()
+        logger.info(f"{Fore.GREEN}Воркер {worker_id} обновлен: busy={busy}{Style.RESET_ALL}")
+        return True
+    except requests.RequestException as e:
+        logger.error(f"{Fore.RED}Ошибка при обновлении воркера {worker_id}: {e}{Style.RESET_ALL}")
+        return False
+
+# Функция для обновления книги
+def update_book(book_id, active_workers_delta=None, read_time_delta=None):
+    try:
+        url = f"{BOOKS_ENDPOINT}{book_id}/"
+        current_book = fetch_book_by_id(book_id)
+        if not current_book:
+            return False
+        data = {}
+        if active_workers_delta is not None:
+            data["active_workers"] = active_workers_delta
+        if read_time_delta is not None:
+            current_read_time = float(current_book["read_time"])
+            # Округляем до целого числа
+            data["read_time"] = int(current_read_time + read_time_delta)
+        if not data:
+            return True
+        logger.info(f"Отправляем PATCH-запрос на {url} с данными: {data}")
+        response = requests.patch(url, json=data, headers=HEADERS, timeout=10)
+        response.raise_for_status()
+        logger.info(f"{Fore.GREEN}Книга {book_id} обновлена: {data}{Style.RESET_ALL}")
+        return True
+    except requests.RequestException as e:
+        logger.error(f"{Fore.RED}Ошибка при обновлении книги {book_id}: {e}{Style.RESET_ALL}")
+        logger.error(f"Ответ сервера: {e.response.text if e.response else 'Нет ответа'}")
+        return False
+    
+
+# Функция для получения данных о книге по ID
+def fetch_book_by_id(book_id):
+    try:
+        url = f"{BOOKS_ENDPOINT}{book_id}/"
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as e:
+        logger.error(f"{Fore.RED}Ошибка при получении книги {book_id}: {e}{Style.RESET_ALL}")
+        return None
+
+# Функция для обновления главы
+def update_chapter(chapter_id, read_time_delta):
+    try:
+        url = f"{CHAPTERS_ENDPOINT}{chapter_id}/"
+        current_chapter = fetch_chapter_by_id(chapter_id)
+        if current_chapter:
+            current_read_time = float(current_chapter["read_time"])
+            # Округляем до целого числа
+            data = {"read_time": int(current_read_time + read_time_delta)}
+            logger.info(f"Отправляем PATCH-запрос на {url} с данными: {data}")
+            response = requests.patch(url, json=data, headers=HEADERS, timeout=10)
+            response.raise_for_status()
+            logger.info(f"{Fore.GREEN}Глава {chapter_id} обновлена: время чтения +{read_time_delta}{Style.RESET_ALL}")
+            return True
+        return False
+    except requests.RequestException as e:
+        logger.error(f"{Fore.RED}Ошибка при обновлении главы {chapter_id}: {e}{Style.RESET_ALL}")
+        logger.error(f"Ответ сервера: {e.response.text if e.response else 'Нет ответа'}")
+        return False
+
+# Функция для получения данных о главе по ID
+def fetch_chapter_by_id(chapter_id):
+    try:
+        url = f"{CHAPTERS_ENDPOINT}{chapter_id}/"
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as e:
+        logger.error(f"{Fore.RED}Ошибка при получении главы {chapter_id}: {e}{Style.RESET_ALL}")
+        return None
+
+
 # Функция для получения списка прокси
 def get_proxy_list():
     api_url = "https://proxy-bunker.com/api2.php"
@@ -40,45 +182,10 @@ def get_proxy_list():
         return []
 
 # Конфигурация
-BOOK_ID = 413490
-BOOK_URL = f"https://author.today/reader/{BOOK_ID}"  # Ссылка на книгу
-TOTAL_CHAPTERS = 24  # Количество глав
-CHAPTER_IDS = [3826592, 3826593, 3827548, 3828882, 3841985, 3844652, 3845199, 3852877, 3859022, 3868434, 3868775, 3870949, 3873806, 3882574, 3886032, 3889203, 3897565, 3902571, 3918163, 3927391, 3945864, 3952284, 3961644, 3964629]  # Список ID глав
-TOTAL_SESSIONS = 1  # Количество сессий за один цикл чтения
-REPEAT_COUNT = 10000  # Количество раз, которые нужно перезапустить чтение книги
-CHAPTER_DISTRIBUTION = [100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  # Вероятности выбора глав (для первой сессии)
-FILTER_PERCENTAGE = 0  # Процент сессий с переходом через фильтры
-MIN_READING_TIME = 180  # Минимальное время чтения одной главы (в секундах)
-MAX_READING_TIME = 240  # Максимальное время чтения одной главы (в секундах)
-MIN_SESSION_TIME = 1800  # Минимальное время сессии (30 минут в секундах)
-MAX_SESSION_TIME = 2400  # Максимальное время сессии (40 минут в секундах)
-MAX_WORKERS_DEFAULT = 1  # Количество параллельных сессий по умолчанию
-USE_PROXIES = True  # Использовать прокси (True) или нет (False)
-PROXY_LIST = []  # Изначально пустой список прокси, будет обновляться перед каждым циклом
-VISUAL_MODE = False  # True - видимый браузер и одна сессия, False - скрытый режим и консоль
-SESSION_DELAY = (5, 10)  # Диапазон задержки между сессиями (в секундах)
-MAX_PROXY_RETRIES = 3
 
-# Глобальное состояние для отслеживания прочитанных глав в текущем цикле
-CURRENT_CYCLE_READ_CHAPTERS = set()  # Множество успешно прочитанных глав в текущем цикле
 
-# Установка MAX_WORKERS в зависимости от VISUAL_MODE
-MAX_WORKERS = 1 if VISUAL_MODE else MAX_WORKERS_DEFAULT
 
-# Проверка соответствия количества глав и ID
-if len(CHAPTER_IDS) != TOTAL_CHAPTERS:
-    raise ValueError("Количество CHAPTER_IDS должно соответствовать TOTAL_CHAPTERS")
-if len(CHAPTER_DISTRIBUTION) != TOTAL_CHAPTERS:
-    CHAPTER_DISTRIBUTION.extend([0] * (TOTAL_CHAPTERS - len(CHAPTER_DISTRIBUTION)))
-    logger.warning("Распределение сессий дополнено нулями до количества глав.")
 
-# Проверка корректности времени
-if MIN_READING_TIME >= MAX_READING_TIME:
-    raise ValueError("MIN_READING_TIME должен быть меньше MAX_READING_TIME")
-if MIN_SESSION_TIME >= MAX_SESSION_TIME:
-    raise ValueError("MIN_SESSION_TIME должен быть меньше MAX_SESSION_TIME")
-if MIN_SESSION_TIME < MIN_READING_TIME:
-    raise ValueError("MIN_SESSION_TIME должен быть больше MIN_READING_TIME")
 
 # Список user-agents для мобильного режима
 user_agents = [
@@ -93,7 +200,8 @@ user_agents = [
 ]
 
 # Настройка драйвера (мобильный режим)
-def setup_driver(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE, retries=0):
+# Исправим setup_driver, чтобы он принимал конкретный прокси
+def setup_driver(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE, proxy_list=None, retries=0):
     chrome_options = Options()
     user_data_dir = tempfile.mkdtemp(prefix="chrome_profile_")
     chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
@@ -108,13 +216,14 @@ def setup_driver(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE, retries=0):
     user_agent = random.choice(user_agents)
     chrome_options.add_argument(f"user-agent={user_agent}")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    proxy = None
-    if use_proxies and PROXY_LIST:
-        proxy = random.choice(PROXY_LIST)
+    
+    if use_proxies and proxy_list:
+        proxy = proxy_list[0]  # Берем первый (и единственный) элемент из списка
         chrome_options.add_argument(f'--proxy-server={proxy}')
-        print(f"{Fore.CYAN}Попытка использовать прокси: {proxy} (попытка {retries + 1}/{MAX_PROXY_RETRIES}){Style.RESET_ALL}")
+        logger.info(f"{Fore.CYAN}Применяем прокси: {proxy} (попытка {retries + 1}/{MAX_PROXY_RETRIES}){Style.RESET_ALL}")
     else:
-        print(f"{Fore.CYAN}Прокси не используются{Style.RESET_ALL}")
+        logger.info(f"{Fore.CYAN}Прокси не используются{Style.RESET_ALL}")
+    
     try:
         driver = webdriver.Chrome(options=chrome_options)
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
@@ -125,9 +234,10 @@ def setup_driver(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE, retries=0):
         logger.info(f"{Fore.CYAN}Выбрано устройство для эмуляции: {mobile_emulation['deviceName']}{Style.RESET_ALL}")
         return driver
     except Exception as e:
+        logger.error(f"{Fore.RED}Ошибка при настройке драйвера: {e}{Style.RESET_ALL}")
         if driver:
             driver.quit()
-
+        return None
 
 # Проверка на Cloudflare
 def check_cloudflare(driver):
@@ -150,9 +260,10 @@ def check_cloudflare(driver):
         return True
 
 # Имитация перехода через фильтры
-def navigate_through_filters(driver):
+def navigate_through_filters(driver, book):
     try:
-        book_url = f"https://author.today/work/{BOOK_ID}"
+        book_id = book["book_id"]
+        book_url = f"https://author.today/work/{book_id}"
         driver.get(book_url)
         if not check_cloudflare(driver):
             logger.warning(f"{Fore.YELLOW}Обнаружена проблема с Cloudflare на {book_url}{Style.RESET_ALL}")
@@ -160,22 +271,22 @@ def navigate_through_filters(driver):
         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         logger.info(f"{Fore.CYAN}Страница книги {book_url} успешно загружена{Style.RESET_ALL}")
         read_book_button = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH, f"//a[contains(@class, 'btn-read-work') and @href='/reader/{BOOK_ID}']"))
+            EC.element_to_be_clickable((By.XPATH, f"//a[contains(@class, 'btn-read-work') and @href='/reader/{book_id}']"))
         )
         read_book_button.click()
-        logger.info(f"{Fore.GREEN}Клик по кнопке 'Читать книгу' выполнен для книги {BOOK_ID}{Style.RESET_ALL}")
+        logger.info(f"{Fore.GREEN}Клик по кнопке 'Читать книгу' выполнен для книги {book_id}{Style.RESET_ALL}")
         time.sleep(random.uniform(1, 3))
         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         logger.info(f"{Fore.GREEN}Переход через фильтры выполнен, загружена страница читалки{Style.RESET_ALL}")
         return True
     except TimeoutException as e:
-        logger.error(f"{Fore.RED}Таймаут при переходе через фильтры для книги {BOOK_ID}: {e}{Style.RESET_ALL}")
+        logger.error(f"{Fore.RED}Таймаут при переходе через фильтры для книги {book_id}: {e}{Style.RESET_ALL}")
         return False
     except Exception as e:
-        logger.error(f"{Fore.RED}Неизвестная ошибка при выполнении перехода для книги {BOOK_ID}: {e}{Style.RESET_ALL}")
+        logger.error(f"{Fore.RED}Неизвестная ошибка при выполнении перехода для книги {book_id}: {e}{Style.RESET_ALL}")
         return False
 
-def read_chapter_mobile(driver, chapter_url, remaining_time):
+def read_chapter_mobile(driver, book, chapter_url, remaining_time):
     try:
         initial_delay = random.uniform(1.5, 3.5)
         time.sleep(initial_delay)
@@ -184,7 +295,7 @@ def read_chapter_mobile(driver, chapter_url, remaining_time):
         #     return 0
         # WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))  # Это тоже уже сделано
         
-        reading_time = min(random.uniform(MIN_READING_TIME, MAX_READING_TIME), remaining_time)
+        reading_time = min(random.uniform(book["min_reading_time"], book["max_reading_time"]), remaining_time)
         logger.info(f"{Fore.YELLOW}Начато чтение главы: {chapter_url}, планируемое время: {reading_time:.1f} сек{Style.RESET_ALL}")
         page_height = driver.execute_script("return document.body.scrollHeight")
         screen_height = driver.execute_script("return window.innerHeight")
@@ -251,136 +362,237 @@ def handle_age_verification(driver):
     
 
 
-def simulate_session(session_id, use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
-    global CURRENT_CYCLE_READ_CHAPTERS
-    use_filters = random.randint(1, 100) <= FILTER_PERCENTAGE
-    session_duration = random.uniform(MIN_SESSION_TIME, MAX_SESSION_TIME)
-    driver = None  # Инициализируем driver как None
+def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read_chapters, use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
+    if not book["active"] or book["workers"] <= book["active_workers"]:
+        logger.info(f"{Fore.YELLOW}Книга {book['name']} не активна или нет свободных слотов{Style.RESET_ALL}")
+        return False
+
+    use_filters = random.randint(1, 100) <= book["page_percentage"]
+    session_duration = random.uniform(book["min_session_time"], book["max_session_time"])
+    book_url = f"https://author.today/reader/{book['book_id']}"
+    chapters = [ch for ch in book["chapters"] if ch["active"]]
+    if not chapters:
+        logger.warning(f"{Fore.YELLOW}Нет активных глав для книги {book['name']}{Style.RESET_ALL}")
+        return False
+
+    driver = None
+    current_proxy = None
     try:
-        driver = setup_driver(use_proxies=use_proxies, visual_mode=visual_mode)
+        # Инициализируем первый прокси
+        if use_proxies and proxy_list:
+            current_proxy = random.choice(proxy_list)
+            logger.info(f"{Fore.CYAN}Используем прокси для сессии: {current_proxy}{Style.RESET_ALL}")
+        driver = setup_driver(use_proxies=use_proxies, visual_mode=visual_mode, proxy_list=[current_proxy] if current_proxy else [])
         if not driver:
             logger.error(f"{Fore.RED}Сессия {session_id} не запущена из-за проблем с драйвером{Style.RESET_ALL}")
-            return
-        
+            return False
+
         total_time_spent = 0
         chapters_read_in_session = 0
         
         logger.info(f"{Fore.MAGENTA}Старт сессии {session_id}, планируемая длительность: {session_duration:.1f} сек{Style.RESET_ALL}")
-        logger.info(f"{Fore.CYAN}Прочитано глав в текущем цикле: {len(CURRENT_CYCLE_READ_CHAPTERS)} из {TOTAL_CHAPTERS}{Style.RESET_ALL}")
+        logger.info(f"{Fore.CYAN}Прочитано глав в текущем цикле: {len(current_cycle_read_chapters)} из {len(chapters)}{Style.RESET_ALL}")
         
-        # Если используем фильтры, идём через страницу книги
         if use_filters:
-            if not navigate_through_filters(driver):
-                return
+            if not navigate_through_filters(driver, book):
+                return False
             total_time_spent += random.uniform(1, 5)
-        
-        # Определяем стартовую главу
-        if not CURRENT_CYCLE_READ_CHAPTERS:  # Если ещё ничего не прочитано
-            current_chapter_index = random.choices(range(TOTAL_CHAPTERS), weights=CHAPTER_DISTRIBUTION, k=1)[0]
-        else:  # Начинаем с первой непрочитанной главы
-            current_chapter_index = min([i for i in range(TOTAL_CHAPTERS) if i not in CURRENT_CYCLE_READ_CHAPTERS])
-        
-        # Читаем текущую главу
-        while total_time_spent < session_duration and len(CURRENT_CYCLE_READ_CHAPTERS) < TOTAL_CHAPTERS:
+
+        # Если все главы прочитаны, сбрасываем цикл и меняем прокси
+        unread_chapters = [i for i in range(len(chapters)) if i not in current_cycle_read_chapters]
+        if not unread_chapters:
+            logger.info(f"{Fore.GREEN}Все главы книги {book['name']} прочитаны, начинаем цикл заново с новым прокси{Style.RESET_ALL}")
+            current_cycle_read_chapters.clear()
+            unread_chapters = list(range(len(chapters)))
+            if use_proxies and proxy_list:
+                # Перезапускаем драйвер с новым прокси
+                driver.quit()
+                current_proxy = random.choice(proxy_list)
+                logger.info(f"{Fore.CYAN}Переключаемся на новый прокси: {current_proxy}{Style.RESET_ALL}")
+                driver = setup_driver(use_proxies=use_proxies, visual_mode=visual_mode, proxy_list=[current_proxy] if current_proxy else [])
+                if not driver:
+                    logger.error(f"{Fore.RED}Не удалось перезапустить драйвер с новым прокси{Style.RESET_ALL}")
+                    return False
+
+        # Выбираем стартовую главу
+        if not current_cycle_read_chapters:
+            chapter_weights = [ch["chapter_distribution"] for ch in chapters]
+            current_chapter_index = random.choices(range(len(chapters)), weights=chapter_weights, k=1)[0]
+        else:
+            current_chapter_index = min(unread_chapters)
+
+        while total_time_spent < session_duration:
             remaining_time = session_duration - total_time_spent
-            if remaining_time < MIN_READING_TIME:
+            if remaining_time < book["min_reading_time"]:
                 break
-            
-            chapter_url = f"{BOOK_URL}/{CHAPTER_IDS[current_chapter_index]}"
-            if not use_filters:  # Если не использовали фильтры, загружаем главу напрямую
+
+            chapter = chapters[current_chapter_index]
+            chapter_url = f"{book_url}/{chapter['chapter_id']}"
+            if not use_filters:
                 driver.get(chapter_url)
                 if not check_cloudflare(driver):
-                    return
+                    return False
                 WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
                 
-                # Проверяем и нажимаем кнопку подтверждения возраста
                 if handle_age_verification(driver):
-                    total_time_spent += random.uniform(1, 3)  # Учитываем время на нажатие
+                    total_time_spent += random.uniform(1, 3)
                 
                 total_time_spent += random.uniform(1, 3)
                 logger.info(f"{Fore.CYAN}Загружена страница главы: {chapter_url}{Style.RESET_ALL}")
+
+            reading_time = read_chapter_mobile(driver, book, chapter_url, remaining_time)
             
-            reading_time = read_chapter_mobile(driver, chapter_url, remaining_time)
-            
-            if reading_time > 0:  # Глава прочитана успешно
+            if reading_time > 0:
                 total_time_spent += reading_time
                 chapters_read_in_session += 1
-                CURRENT_CYCLE_READ_CHAPTERS.add(current_chapter_index)
-                logger.info(f"{Fore.GREEN}Глава {CHAPTER_IDS[current_chapter_index]} прочитана{Style.RESET_ALL}")
+                current_cycle_read_chapters.add(current_chapter_index)
+                chapter["read_time"] += reading_time
+                book["read_time"] = int(float(book["read_time"]) + int(reading_time))
                 
-                # Переход к следующей главе только после успешного чтения
+                update_book(book["id"], read_time_delta=reading_time)
+                update_chapter(chapter["id"], read_time_delta=reading_time)
+                
+                logger.info(f"{Fore.GREEN}Глава {chapter['chapter_id']} прочитана за {reading_time:.1f} сек{Style.RESET_ALL}")
+                
+                # Проверяем непрочитанные главы
+                unread_chapters = [i for i in range(len(chapters)) if i not in current_cycle_read_chapters]
+                if not unread_chapters:
+                    logger.info(f"{Fore.GREEN}Все главы прочитаны в этой сессии, начинаем цикл заново с новым прокси{Style.RESET_ALL}")
+                    current_cycle_read_chapters.clear()
+                    unread_chapters = list(range(len(chapters)))
+                    if use_proxies and proxy_list:
+                        # Перезапускаем драйвер с новым прокси
+                        driver.quit()
+                        current_proxy = random.choice(proxy_list)
+                        logger.info(f"{Fore.CYAN}Переключаемся на новый прокси: {current_proxy}{Style.RESET_ALL}")
+                        driver = setup_driver(use_proxies=use_proxies, visual_mode=visual_mode, proxy_list=[current_proxy] if current_proxy else [])
+                        if not driver:
+                            logger.error(f"{Fore.RED}Не удалось перезапустить драйвер с новым прокси{Style.RESET_ALL}")
+                            return False
+
                 next_chapter_index = current_chapter_index + 1
-                if next_chapter_index >= TOTAL_CHAPTERS:
-                    break
+                if next_chapter_index >= len(chapters):
+                    next_chapter_index = 0  # Начинаем с начала
                 if go_to_next_chapter(driver):
                     current_chapter_index = next_chapter_index
                     total_time_spent += random.uniform(1, 2)
                 else:
-                    logger.info(f"{Fore.YELLOW}Нет следующей главы для чтения{Style.RESET_ALL}")
-                    break
+                    logger.info(f"{Fore.YELLOW}Нет следующей главы для чтения, переходим к первой{Style.RESET_ALL}")
+                    current_chapter_index = 0
+                    driver.get(f"{book_url}/{chapters[0]['chapter_id']}")
+                    total_time_spent += random.uniform(1, 3)
             else:
-                logger.warning(f"{Fore.YELLOW}Глава {CHAPTER_IDS[current_chapter_index]} не была прочитана из-за ошибки{Style.RESET_ALL}")
-                break  # Прерываем, чтобы следующая сессия начала с этой же главы
-        
-        logger.info(f"{Fore.MAGENTA}Сессия {session_id} завершена: прочитано {chapters_read_in_session} глав, всего в цикле {len(CURRENT_CYCLE_READ_CHAPTERS)}/{TOTAL_CHAPTERS}{Style.RESET_ALL}")
+                logger.warning(f"{Fore.YELLOW}Глава {chapter['chapter_id']} не была прочитана из-за ошибки{Style.RESET_ALL}")
+                break
+
+        logger.info(f"{Fore.MAGENTA}Сессия {session_id} завершена: прочитано {chapters_read_in_session} глав, всего в цикле {len(current_cycle_read_chapters)}/{len(chapters)}{Style.RESET_ALL}")
+        return True
     except Exception as e:
         logger.error(f"{Fore.RED}Ошибка в сессии {session_id}: {e}{Style.RESET_ALL}")
+        return False
     finally:
-        if driver is not None:  # Безопасно закрываем драйвер
+        if driver is not None:
             driver.quit()
         delay = random.uniform(*SESSION_DELAY)
         logger.info(f"{Fore.CYAN}Задержка перед следующей сессией: {delay:.1f} сек{Style.RESET_ALL}")
         time.sleep(delay)
 
 
-# Основная функция с повторением и обновлением прокси
+
+
 def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
-    global CURRENT_CYCLE_READ_CHAPTERS
-    logger.info(f"{Fore.BLUE}Запуск имитации чтения книги: {BOOK_URL}{Style.RESET_ALL}")
-    logger.info(f"{Fore.BLUE}Всего сессий за цикл: {TOTAL_SESSIONS}, глав: {TOTAL_CHAPTERS}, через фильтры: {FILTER_PERCENTAGE}%{Style.RESET_ALL}")
-    logger.info(f"{Fore.BLUE}Вероятности выбора глав: {CHAPTER_DISTRIBUTION}{Style.RESET_ALL}")
-    logger.info(f"{Fore.BLUE}ID глав: {CHAPTER_IDS}{Style.RESET_ALL}")
-    logger.info(f"{Fore.BLUE}Время чтения одной главы: от {MIN_READING_TIME} до {MAX_READING_TIME} сек{Style.RESET_ALL}")
-    logger.info(f"{Fore.BLUE}Длительность сессий: от {MIN_SESSION_TIME} до {MAX_SESSION_TIME} сек{Style.RESET_ALL}")
-    logger.info(f"{Fore.BLUE}Использование прокси: {'Да' if use_proxies else 'Нет'}{Style.RESET_ALL}")
-    logger.info(f"{Fore.BLUE}Визуальный режим: {'Включен' if visual_mode else 'Выключен'} (MAX_WORKERS: {MAX_WORKERS}){Style.RESET_ALL}")
-    logger.info(f"{Fore.BLUE}Количество повторений: {REPEAT_COUNT}{Style.RESET_ALL}")
+    current_cycle_read_chapters = set()
+    logger.info(f"{Fore.BLUE}Запуск имитации чтения{Style.RESET_ALL}")
 
-    for repeat in range(REPEAT_COUNT + 1):
-        if use_proxies:
-            global PROXY_LIST
-            PROXY_LIST = get_proxy_list()
-            if not PROXY_LIST:
-                logger.warning(f"{Fore.YELLOW}Список прокси пуст, продолжаем без прокси для цикла {repeat + 1}{Style.RESET_ALL}")
-                use_proxies = False
-            else:
-                logger.info(f"{Fore.CYAN}Список прокси обновлён перед циклом {repeat + 1}: {len(PROXY_LIST)} прокси доступно{Style.RESET_ALL}")
-        else:
-            logger.info(f"{Fore.CYAN}Прокси не используются для цикла {repeat + 1}{Style.RESET_ALL}")
+    delay = random.uniform(1, 15)  # От 1 до 3 минут (60–180 секунд)
+    logger.info(f"{Fore.CYAN}Задержка перед созданием воркера: {delay:.1f} сек{Style.RESET_ALL}")
+    time.sleep(delay)
 
-        logger.info(f"{Fore.MAGENTA}Цикл чтения {repeat + 1} из {REPEAT_COUNT + 1}{Style.RESET_ALL}")
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            futures = [executor.submit(simulate_session, i + (repeat * TOTAL_SESSIONS), use_proxies, visual_mode) for i in range(TOTAL_SESSIONS)]
-            for future in as_completed(futures):
-                try:
-                    future.result()
-                except Exception as e:
-                    logger.error(f"{Fore.RED}Ошибка в потоке: {e}{Style.RESET_ALL}")
-        
-        if len(CURRENT_CYCLE_READ_CHAPTERS) == TOTAL_CHAPTERS:
-            logger.info(f"{Fore.GREEN}Книга прочитана полностью в цикле {repeat + 1}{Style.RESET_ALL}")
-            CURRENT_CYCLE_READ_CHAPTERS = set()  # Сбрасываем только после полного прочтения
+    # Получаем воркера один раз при старте
+    worker = get_or_create_worker()
+    if not worker:
+        logger.error(f"{Fore.RED}Не удалось получить воркера. Завершение.{Style.RESET_ALL}")
+        return
+
+    worker_id = worker["id"]
+    logger.info(f"{Fore.GREEN}Воркер {worker_id} запущен с книгой: {worker['book']}{Style.RESET_ALL}")
+
+    # Загружаем список прокси один раз и передаем его в сессии
+    proxy_list = get_proxy_list() if use_proxies else []
+    if use_proxies and not proxy_list:
+        logger.warning(f"{Fore.YELLOW}Список прокси пуст, продолжаем без прокси{Style.RESET_ALL}")
+        use_proxies = False
+
+    # Флаг для отслеживания завершения цикла
+    previous_cycle_completed = True
+
+    while True:
+        # Получаем актуальные данные воркера
+        try:
+            response = requests.get(f"{WORKERS_ENDPOINT}{worker_id}/", timeout=10)
+            response.raise_for_status()
+            worker = response.json()
+        except requests.RequestException as e:
+            logger.error(f"{Fore.RED}Ошибка при обновлении данных воркера {worker_id}: {e}{Style.RESET_ALL}")
+            time.sleep(60)  # Ждем перед повторной попыткой
+            continue
+
+        book_id = worker["book"]
+        if not book_id:
+            logger.info(f"{Fore.YELLOW}У воркера {worker_id} нет привязанной книги, ждем 60 сек{Style.RESET_ALL}")
+            time.sleep(60)
+            continue
+
+        # Получаем данные книги по ID из поля book
+        available_book = fetch_book_by_id(worker['book_id'])
+        if not available_book or not available_book["active"]:
+            logger.warning(f"{Fore.YELLOW}Книга {book_id} не найдена или не активна, ждем 60 сек{Style.RESET_ALL}")
+            time.sleep(60)
+            continue
+
+        # Проверяем слоты воркеров для книги
+        current_workers = available_book["active_workers"]
+        if available_book["workers"] <= current_workers:
+            logger.info(f"{Fore.YELLOW}Нет свободных слотов для книги {available_book['name']}, ждем 60 сек{Style.RESET_ALL}")
+            time.sleep(60)
+            continue
+
+        # Увеличиваем active_workers для книги
+        if not update_book(available_book["id"], active_workers_delta=current_workers + 1):
+            logger.error(f"{Fore.RED}Не удалось обновить книгу {available_book['name']}{Style.RESET_ALL}")
+            time.sleep(60)
+            continue
+
+        logger.info(f"{Fore.BLUE}Обрабатываем книгу: {available_book['name']} (ID: {available_book['book_id']}) с воркером {worker_id}{Style.RESET_ALL}")
+
+        # Добавляем случайную задержку перед новым чтением, если предыдущий цикл завершен
+        if previous_cycle_completed and not current_cycle_read_chapters:
+            delay = random.uniform(60, 180)  # От 1 до 3 минут (60–180 секунд)
+            logger.info(f"{Fore.CYAN}Задержка перед новым чтением книги: {delay:.1f} сек{Style.RESET_ALL}")
+            time.sleep(delay)
+
+        success = simulate_session(available_book, 1, worker_id, proxy_list, current_cycle_read_chapters, use_proxies, visual_mode)
+
+        # После завершения сессии уменьшаем активных воркеров
+        update_book(available_book["id"], active_workers_delta=current_workers)
+
+        # Проверяем, завершился ли цикл полностью
+        if success and len(current_cycle_read_chapters) == len(available_book["chapters"]):
+            previous_cycle_completed = True
         else:
-            logger.warning(f"{Fore.YELLOW}Книга не прочитана полностью в цикле {repeat + 1} ({len(CURRENT_CYCLE_READ_CHAPTERS)}/{TOTAL_CHAPTERS}){Style.RESET_ALL}")
-        
-        if repeat < REPEAT_COUNT:
-            logger.info(f"{Fore.CYAN}Перезапуск цикла чтения...{Style.RESET_ALL}")
-            time.sleep(random.uniform(10, 20))
-    
-    logger.info(f"{Fore.BLUE}Чтение книги завершено после {REPEAT_COUNT + 1} циклов{Style.RESET_ALL}")
+            previous_cycle_completed = False
+
+        if not success:
+            logger.warning(f"{Fore.YELLOW}Сессия завершилась с ошибкой, ждем перед следующей попыткой{Style.RESET_ALL}")
+            time.sleep(random.uniform(5, 15))
+
+        # Цикл продолжается бесконечно, воркер продолжает проверять book
+
 
 
 
 
 if __name__ == "__main__":
-    simulate_reading(use_proxies=USE_PROXIES, visual_mode=False)
+
+    # print(fetch_books_data())
+    simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE)

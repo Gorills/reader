@@ -61,9 +61,11 @@ def fetch_books_data():
 
 # Функция для получения или создания воркера
 def get_or_create_worker():
-    """Получение уникального свободного воркера через атомарный API-метод."""
+    
+    
+    
     try:
-        response = requests.get(f"{WORKERS_ENDPOINT}assign/", timeout=10)
+        response = requests.get(f"{WORKERS_ENDPOINT}assign/", headers=HEADERS, timeout=10)
         response.raise_for_status()
         worker = response.json()
         

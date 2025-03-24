@@ -504,7 +504,7 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
     current_cycle_read_chapters = set()
     logger.info(f"{Fore.BLUE}Запуск имитации чтения{Style.RESET_ALL}")
 
-    delay = random.uniform(5, 30)  # От 1 до 3 минут (60–180 секунд)
+    delay = random.uniform(1, 40)  # От 1 до 3 минут (60–180 секунд)
     logger.info(f"{Fore.CYAN}Задержка перед созданием воркера: {delay:.1f} сек{Style.RESET_ALL}")
     time.sleep(delay)
 

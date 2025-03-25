@@ -39,9 +39,9 @@ HEADERS = {
 
 
 
-USE_PROXIES = False  # Использовать прокси (True) или нет (False)
+USE_PROXIES = True  # Использовать прокси (True) или нет (False)
 PROXY_LIST = []  # Изначально пустой список прокси, будет обновляться перед каждым циклом
-VISUAL_MODE = True  # True - видимый браузер и одна сессия, False - скрытый режим и консоль
+VISUAL_MODE = False  # True - видимый браузер и одна сессия, False - скрытый режим и консоль
 SESSION_DELAY = (5, 10)  # Диапазон задержки между сессиями (в секундах)
 MAX_PROXY_RETRIES = 3
 

@@ -39,9 +39,9 @@ HEADERS = {
 
 
 
-USE_PROXIES = True  # Использовать прокси (True) или нет (False)
+USE_PROXIES = False  # Использовать прокси (True) или нет (False)
 PROXY_LIST = []  # Изначально пустой список прокси, будет обновляться перед каждым циклом
-VISUAL_MODE = False  # True - видимый браузер и одна сессия, False - скрытый режим и консоль
+VISUAL_MODE = True  # True - видимый браузер и одна сессия, False - скрытый режим и консоль
 SESSION_DELAY = (5, 10)  # Диапазон задержки между сессиями (в секундах)
 MAX_PROXY_RETRIES = 3
 
@@ -361,7 +361,6 @@ def handle_age_verification(driver):
         return False
     
 
-
 def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read_chapters, use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
     if not book["active"] or book["workers"] <= book["active_workers"]:
         logger.info(f"{Fore.YELLOW}Книга {book['name']} не активна или нет свободных слотов{Style.RESET_ALL}")
@@ -369,7 +368,7 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
 
     use_filters = random.randint(1, 100) <= book["page_percentage"]
     session_duration = random.uniform(book["min_session_time"], book["max_session_time"])
-    book_url = f"https://author.today/reader/{book['book_id']}"
+    target_book_url = f"https://author.today/reader/{book['book_id']}"
     chapters = [ch for ch in book["chapters"] if ch["active"]]
     if not chapters:
         logger.warning(f"{Fore.YELLOW}Нет активных глав для книги {book['name']}{Style.RESET_ALL}")
@@ -378,7 +377,7 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
     driver = None
     current_proxy = None
     try:
-        # Инициализируем первый прокси
+        # Инициализируем прокси
         if use_proxies and proxy_list:
             current_proxy = random.choice(proxy_list)
             logger.info(f"{Fore.CYAN}Используем прокси для сессии: {current_proxy}{Style.RESET_ALL}")
@@ -393,10 +392,54 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
         logger.info(f"{Fore.MAGENTA}Старт сессии {session_id}, планируемая длительность: {session_duration:.1f} сек{Style.RESET_ALL}")
         logger.info(f"{Fore.CYAN}Прочитано глав в текущем цикле: {len(current_cycle_read_chapters)} из {len(chapters)}{Style.RESET_ALL}")
         
-        if use_filters:
-            if not navigate_through_filters(driver, book):
-                return False
-            total_time_spent += random.uniform(1, 5)
+        # Заходим на real-rpg-books.ru
+        driver.get("https://real-rpg-books.ru/")
+        if not check_cloudflare(driver):
+            logger.error(f"{Fore.RED}Не удалось пройти Cloudflare на real-rpg-books.ru{Style.RESET_ALL}")
+            return False
+        
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+        logger.info(f"{Fore.CYAN}Страница real-rpg-books.ru загружена{Style.RESET_ALL}")
+
+        # Ищем ссылку с нужным book_id
+        target_link_xpath = f"//a[contains(@href, 'https://author.today/reader/{book['book_id']}')]"
+        try:
+            book_link = WebDriverWait(driver, 15).until(
+                EC.presence_of_element_located((By.XPATH, target_link_xpath))
+            )
+            # Прокручиваем к элементу
+            driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", book_link)
+            time.sleep(random.uniform(0.5, 1.5))  # Даем время на завершение прокрутки
+            
+            # Ждем, пока элемент станет кликабельным
+            WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, target_link_xpath))
+            )
+            
+            # Пробуем обычный клик
+            try:
+                book_link.click()
+                logger.info(f"{Fore.GREEN}Обычный клик по ссылке для книги {book['book_id']} выполнен{Style.RESET_ALL}")
+            except Exception as e:
+                logger.warning(f"{Fore.YELLOW}Обычный клик не сработал: {e}, пробуем JavaScript-клик{Style.RESET_ALL}")
+                # Если обычный клик не сработал, используем JavaScript
+                driver.execute_script("arguments[0].click();", book_link)
+                logger.info(f"{Fore.GREEN}JavaScript-клик по ссылке для книги {book['book_id']} выполнен{Style.RESET_ALL}")
+            
+            total_time_spent += random.uniform(1, 3)
+        except TimeoutException:
+            logger.error(f"{Fore.RED}Ссылка для книги {book['book_id']} не найдена или не стала кликабельной на real-rpg-books.ru{Style.RESET_ALL}")
+            return False
+
+        # Ждем загрузки страницы читалки
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+        if not check_cloudflare(driver):
+            logger.error(f"{Fore.RED}Не удалось пройти Cloudflare на странице читалки{Style.RESET_ALL}")
+            return False
+        
+        # Обрабатываем проверку возраста, если есть
+        if handle_age_verification(driver):
+            total_time_spent += random.uniform(1, 3)
 
         # Если все главы прочитаны, сбрасываем цикл и меняем прокси
         unread_chapters = [i for i in range(len(chapters)) if i not in current_cycle_read_chapters]
@@ -405,7 +448,6 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
             current_cycle_read_chapters.clear()
             unread_chapters = list(range(len(chapters)))
             if use_proxies and proxy_list:
-                # Перезапускаем драйвер с новым прокси
                 driver.quit()
                 current_proxy = random.choice(proxy_list)
                 logger.info(f"{Fore.CYAN}Переключаемся на новый прокси: {current_proxy}{Style.RESET_ALL}")
@@ -413,6 +455,8 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
                 if not driver:
                     logger.error(f"{Fore.RED}Не удалось перезапустить драйвер с новым прокси{Style.RESET_ALL}")
                     return False
+                driver.get(target_book_url)
+                WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
 
         # Выбираем стартовую главу
         if not current_cycle_read_chapters:
@@ -427,18 +471,10 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
                 break
 
             chapter = chapters[current_chapter_index]
-            chapter_url = f"{book_url}/{chapter['chapter_id']}"
-            if not use_filters:
-                driver.get(chapter_url)
-                if not check_cloudflare(driver):
-                    return False
-                WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-                
-                if handle_age_verification(driver):
-                    total_time_spent += random.uniform(1, 3)
-                
-                total_time_spent += random.uniform(1, 3)
-                logger.info(f"{Fore.CYAN}Загружена страница главы: {chapter_url}{Style.RESET_ALL}")
+            chapter_url = f"{target_book_url}/{chapter['chapter_id']}"
+            driver.get(chapter_url)
+            WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+            logger.info(f"{Fore.CYAN}Загружена страница главы: {chapter_url}{Style.RESET_ALL}")
 
             reading_time = read_chapter_mobile(driver, book, chapter_url, remaining_time)
             
@@ -454,14 +490,12 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
                 
                 logger.info(f"{Fore.GREEN}Глава {chapter['chapter_id']} прочитана за {reading_time:.1f} сек{Style.RESET_ALL}")
                 
-                # Проверяем непрочитанные главы
                 unread_chapters = [i for i in range(len(chapters)) if i not in current_cycle_read_chapters]
                 if not unread_chapters:
                     logger.info(f"{Fore.GREEN}Все главы прочитаны в этой сессии, начинаем цикл заново с новым прокси{Style.RESET_ALL}")
                     current_cycle_read_chapters.clear()
                     unread_chapters = list(range(len(chapters)))
                     if use_proxies and proxy_list:
-                        # Перезапускаем драйвер с новым прокси
                         driver.quit()
                         current_proxy = random.choice(proxy_list)
                         logger.info(f"{Fore.CYAN}Переключаемся на новый прокси: {current_proxy}{Style.RESET_ALL}")
@@ -469,17 +503,19 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
                         if not driver:
                             logger.error(f"{Fore.RED}Не удалось перезапустить драйвер с новым прокси{Style.RESET_ALL}")
                             return False
+                        driver.get(target_book_url)
+                        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
 
                 next_chapter_index = current_chapter_index + 1
                 if next_chapter_index >= len(chapters):
-                    next_chapter_index = 0  # Начинаем с начала
+                    next_chapter_index = 0
                 if go_to_next_chapter(driver):
                     current_chapter_index = next_chapter_index
                     total_time_spent += random.uniform(1, 2)
                 else:
                     logger.info(f"{Fore.YELLOW}Нет следующей главы для чтения, переходим к первой{Style.RESET_ALL}")
                     current_chapter_index = 0
-                    driver.get(f"{book_url}/{chapters[0]['chapter_id']}")
+                    driver.get(f"{target_book_url}/{chapters[0]['chapter_id']}")
                     total_time_spent += random.uniform(1, 3)
             else:
                 logger.warning(f"{Fore.YELLOW}Глава {chapter['chapter_id']} не была прочитана из-за ошибки{Style.RESET_ALL}")

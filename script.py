@@ -377,7 +377,6 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
     driver = None
     current_proxy = None
     try:
-        # Инициализируем прокси
         if use_proxies and proxy_list:
             current_proxy = random.choice(proxy_list)
             logger.info(f"{Fore.CYAN}Используем прокси для сессии: {current_proxy}{Style.RESET_ALL}")
@@ -398,38 +397,57 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
             logger.error(f"{Fore.RED}Не удалось пройти Cloudflare на real-rpg-books.ru{Style.RESET_ALL}")
             return False
         
-        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+        WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         logger.info(f"{Fore.CYAN}Страница real-rpg-books.ru загружена{Style.RESET_ALL}")
 
         # Ищем ссылку с нужным book_id
         target_link_xpath = f"//a[contains(@href, 'https://author.today/reader/{book['book_id']}')]"
-        try:
-            book_link = WebDriverWait(driver, 15).until(
-                EC.presence_of_element_located((By.XPATH, target_link_xpath))
-            )
-            # Прокручиваем к элементу
-            driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", book_link)
-            time.sleep(random.uniform(0.5, 1.5))  # Даем время на завершение прокрутки
-            
-            # Ждем, пока элемент станет кликабельным
-            WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, target_link_xpath))
-            )
-            
-            # Пробуем обычный клик
+        max_attempts = 3
+        for attempt in range(max_attempts):
             try:
-                book_link.click()
-                logger.info(f"{Fore.GREEN}Обычный клик по ссылке для книги {book['book_id']} выполнен{Style.RESET_ALL}")
-            except Exception as e:
-                logger.warning(f"{Fore.YELLOW}Обычный клик не сработал: {e}, пробуем JavaScript-клик{Style.RESET_ALL}")
-                # Если обычный клик не сработал, используем JavaScript
-                driver.execute_script("arguments[0].click();", book_link)
-                logger.info(f"{Fore.GREEN}JavaScript-клик по ссылке для книги {book['book_id']} выполнен{Style.RESET_ALL}")
-            
-            total_time_spent += random.uniform(1, 3)
-        except TimeoutException:
-            logger.error(f"{Fore.RED}Ссылка для книги {book['book_id']} не найдена или не стала кликабельной на real-rpg-books.ru{Style.RESET_ALL}")
-            return False
+                # Прокручиваем страницу вниз, чтобы подгрузился контент
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(random.uniform(1, 2))  # Даём время на подгрузку
+                
+                # Пробуем найти элемент через XPath
+                book_link = WebDriverWait(driver, 20).until(
+                    EC.presence_of_element_located((By.XPATH, target_link_xpath))
+                )
+                driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", book_link)
+                time.sleep(random.uniform(0.5, 1.5))
+                
+                WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, target_link_xpath))
+                )
+
+                location = book_link.location
+                logger.info(f"Позиция ссылки: x={location['x']}, y={location['y']}")
+                
+                # Пробуем обычный клик
+                try:
+                    book_link.click()
+                    logger.info(f"{Fore.GREEN}Обычный клик по ссылке для книги {book['book_id']} выполнен (попытка {attempt + 1}){Style.RESET_ALL}")
+                    break
+                except Exception as e:
+                    logger.warning(f"{Fore.YELLOW}Обычный клик не сработал: {e}, пробуем JavaScript-клик{Style.RESET_ALL}")
+                    driver.execute_script("arguments[0].click();", book_link)
+                    logger.info(f"{Fore.GREEN}JavaScript-клик по ссылке для книги {book['book_id']} выполнен (попытка {attempt + 1}){Style.RESET_ALL}")
+                    break
+                
+            except TimeoutException:
+                logger.warning(f"{Fore.YELLOW}Попытка {attempt + 1}/{max_attempts}: Ссылка для книги {book['book_id']} не найдена или не кликабельна{Style.RESET_ALL}")
+                
+                # Дополнительная отладка: сохраняем HTML страницы
+                with open(f"debug_page_session_{session_id}_attempt_{attempt + 1}.html", "w", encoding="utf-8") as f:
+                    f.write(driver.page_source)
+                logger.info(f"Сохранён HTML страницы для отладки: debug_page_session_{session_id}_attempt_{attempt + 1}.html")
+                
+                if attempt == max_attempts - 1:
+                    logger.error(f"{Fore.RED}Ссылка для книги {book['book_id']} не найдена после {max_attempts} попыток{Style.RESET_ALL}")
+                    return False
+                time.sleep(random.uniform(2, 5))  # Ждём перед следующей попыткой
+        
+        total_time_spent += random.uniform(1, 3)
 
         # Ждем загрузки страницы читалки
         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
@@ -437,7 +455,6 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
             logger.error(f"{Fore.RED}Не удалось пройти Cloudflare на странице читалки{Style.RESET_ALL}")
             return False
         
-        # Обрабатываем проверку возраста, если есть
         if handle_age_verification(driver):
             total_time_spent += random.uniform(1, 3)
 
@@ -523,6 +540,7 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
 
         logger.info(f"{Fore.MAGENTA}Сессия {session_id} завершена: прочитано {chapters_read_in_session} глав, всего в цикле {len(current_cycle_read_chapters)}/{len(chapters)}{Style.RESET_ALL}")
         return True
+    
     except Exception as e:
         logger.error(f"{Fore.RED}Ошибка в сессии {session_id}: {e}{Style.RESET_ALL}")
         return False

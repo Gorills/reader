@@ -586,19 +586,7 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
             time.sleep(60)
             continue
 
-        # Проверяем слоты воркеров для книги
-        current_workers = available_book["active_workers"]
-        if available_book["workers"] <= current_workers:
-            logger.info(f"{Fore.YELLOW}Нет свободных слотов для книги {available_book['name']}, ждем 60 сек{Style.RESET_ALL}")
-            time.sleep(60)
-            continue
-
-        # Увеличиваем active_workers для книги
-        if not update_book(available_book["id"], active_workers_delta=current_workers + 1):
-            logger.error(f"{Fore.RED}Не удалось обновить книгу {available_book['name']}{Style.RESET_ALL}")
-            time.sleep(60)
-            continue
-
+       
         logger.info(f"{Fore.BLUE}Обрабатываем книгу: {available_book['name']} (ID: {available_book['book_id']}) с воркером {worker_id}{Style.RESET_ALL}")
 
         # Добавляем случайную задержку перед новым чтением, если предыдущий цикл завершен
@@ -609,8 +597,6 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
 
         success = simulate_session(available_book, 1, worker_id, proxy_list, current_cycle_read_chapters, use_proxies, visual_mode)
 
-        # После завершения сессии уменьшаем активных воркеров
-        update_book(available_book["id"], active_workers_delta=current_workers)
 
         # Проверяем, завершился ли цикл полностью
         if success and len(current_cycle_read_chapters) == len(available_book["chapters"]):

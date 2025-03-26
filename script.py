@@ -437,11 +437,6 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
             except TimeoutException:
                 logger.warning(f"{Fore.YELLOW}Попытка {attempt + 1}/{max_attempts}: Ссылка для книги {book['book_id']} не найдена или не кликабельна{Style.RESET_ALL}")
                 
-                # Дополнительная отладка: сохраняем HTML страницы
-                with open(f"debug_page_session_{session_id}_attempt_{attempt + 1}.html", "w", encoding="utf-8") as f:
-                    f.write(driver.page_source)
-                logger.info(f"Сохранён HTML страницы для отладки: debug_page_session_{session_id}_attempt_{attempt + 1}.html")
-                
                 if attempt == max_attempts - 1:
                     logger.error(f"{Fore.RED}Ссылка для книги {book['book_id']} не найдена после {max_attempts} попыток{Style.RESET_ALL}")
                     return False

@@ -304,7 +304,7 @@ def read_chapter_mobile(driver, book, target_book_url, chapter_url, remaining_ti
         
         # Ограничиваем время оставшимся временем сессии и добавляем вариацию
         reading_time = min(calculated_reading_time * random.uniform(0.9, 1.1), remaining_time)
-        reading_time = max(reading_time, book["min_reading_time"])  # Учитываем минимальное время из книги
+        
         
         logger.info(f"{Fore.YELLOW}Начато чтение главы: {chapter_url}, объем: {chapter_length} символов, скорость: {reading_speed:.1f} сим/сек, планируемое время: {reading_time:.1f} сек{Style.RESET_ALL}")
         

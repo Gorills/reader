@@ -286,17 +286,27 @@ def navigate_through_filters(driver, book):
         logger.error(f"{Fore.RED}Неизвестная ошибка при выполнении перехода для книги {book_id}: {e}{Style.RESET_ALL}")
         return False
 
-def read_chapter_mobile(driver, book, chapter_url, remaining_time):
+def read_chapter_mobile(driver, book, target_book_url, chapter_url, remaining_time):
     try:
         initial_delay = random.uniform(1.5, 3.5)
         time.sleep(initial_delay)
-        # Убираем driver.get(chapter_url), так как страница уже загружена в simulate_session
-        # if not check_cloudflare(driver):  # Эта проверка уже сделана в цикле
-        #     return 0
-        # WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))  # Это тоже уже сделано
         
-        reading_time = min(random.uniform(book["min_reading_time"], book["max_reading_time"]), remaining_time)
-        logger.info(f"{Fore.YELLOW}Начато чтение главы: {chapter_url}, планируемое время: {reading_time:.1f} сек{Style.RESET_ALL}")
+        # Рассчитываем время чтения на основе объема главы
+        chapter = next((ch for ch in book["chapters"] if f"{target_book_url}/{ch['chapter_id']}" == chapter_url), None)
+        if not chapter or "chapter_length" not in chapter:
+            logger.error(f"{Fore.RED}Глава {chapter_url} не найдена или отсутствует chapter_length{Style.RESET_ALL}")
+            return 0
+        
+        chapter_length = chapter["chapter_length"]  # Длина главы в символах
+        reading_speed = random.uniform(60, 80)  # Скорость чтения в символах/сек (обновленный диапазон)
+        calculated_reading_time = chapter_length / reading_speed  # Время в секундах
+        
+        # Ограничиваем время оставшимся временем сессии и добавляем вариацию
+        reading_time = min(calculated_reading_time * random.uniform(0.9, 1.1), remaining_time)
+        reading_time = max(reading_time, book["min_reading_time"])  # Учитываем минимальное время из книги
+        
+        logger.info(f"{Fore.YELLOW}Начато чтение главы: {chapter_url}, объем: {chapter_length} символов, скорость: {reading_speed:.1f} сим/сек, планируемое время: {reading_time:.1f} сек{Style.RESET_ALL}")
+        
         page_height = driver.execute_script("return document.body.scrollHeight")
         screen_height = driver.execute_script("return window.innerHeight")
         current_position = 0
@@ -308,6 +318,7 @@ def read_chapter_mobile(driver, book, chapter_url, remaining_time):
         stage_duration = reading_time / total_swipes_needed
         body_element = driver.find_element(By.TAG_NAME, "body")
         actions = ActionChains(driver)
+        
         for stage in range(total_swipes_needed):
             if time_spent >= reading_time:
                 break
@@ -320,6 +331,7 @@ def read_chapter_mobile(driver, book, chapter_url, remaining_time):
             current_position += swipe_distance
             time.sleep(stage_duration)
             time_spent += stage_duration
+        
         logger.info(f"{Fore.GREEN}Глава прочитана полностью за {time_spent:.1f} секунд{Style.RESET_ALL}")
         return time_spent
     except Exception as e:
@@ -488,7 +500,7 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
             WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
             logger.info(f"{Fore.CYAN}Загружена страница главы: {chapter_url}{Style.RESET_ALL}")
 
-            reading_time = read_chapter_mobile(driver, book, chapter_url, remaining_time)
+            reading_time = read_chapter_mobile(driver, book, target_book_url, chapter_url, remaining_time)
             
             if reading_time > 0:
                 total_time_spent += reading_time

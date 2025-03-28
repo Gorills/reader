@@ -428,7 +428,7 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
         
         # Ищем ссылку с нужным book_id и переходим по ней в конце времени
         # target_link_xpath = f"//a[contains(@href, 'https://author.today/reader/{book['book_id']}')]"
-        target_link_xpath = f"//a[contains(@href, 'https://author.today/reader/{book['book_id']}?utm_source=realrpg&utm_medium=referral&utm_campaign=book_link')]"
+        target_link_xpath = f"//a[contains(@href, 'https://author.today/reader/{book['book_id']}/?utm_source=realrpg&utm_medium=referral&utm_campaign=book_link')]"
         max_attempts = 3
         for attempt in range(max_attempts):
             try:

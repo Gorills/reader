@@ -415,7 +415,7 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
         logger.info(f"{Fore.CYAN}Страница real-rpg-books.ru загружена{Style.RESET_ALL}")
 
         # Увеличиваем время на сайте до 30–240 секунд с вариативным скроллингом
-        stay_time = random.uniform(30, 240)  # Время пребывания на сайте в секундах
+        stay_time = random.uniform(10, 20)  # Время пребывания на сайте в секундах
         logger.info(f"{Fore.CYAN}Планируемое время на сайте real-rpg-books.ru: {stay_time:.1f} сек{Style.RESET_ALL}")
         page_height = driver.execute_script("return document.body.scrollHeight")
         start_time = time.time()
@@ -427,7 +427,8 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
             time.sleep(random.uniform(0.5, 2))  # Пауза между скроллами
         
         # Ищем ссылку с нужным book_id и переходим по ней в конце времени
-        target_link_xpath = f"//a[contains(@href, 'https://author.today/reader/{book['book_id']}')]"
+        # target_link_xpath = f"//a[contains(@href, 'https://author.today/reader/{book['book_id']}')]"
+        target_link_xpath = f"//a[contains(@href, 'https://author.today/reader/{book['book_id']}?utm_source=realrpg&utm_medium=referral&utm_campaign=book_link')]"
         max_attempts = 3
         for attempt in range(max_attempts):
             try:

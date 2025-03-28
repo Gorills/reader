@@ -374,6 +374,7 @@ def handle_age_verification(driver):
         return False
     
 
+
 def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read_chapters, use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
     if not book["active"] or book["workers"] <= book["active_workers"]:
         logger.info(f"{Fore.YELLOW}Книга {book['name']} не активна или нет свободных слотов{Style.RESET_ALL}")
@@ -413,16 +414,24 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
         WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         logger.info(f"{Fore.CYAN}Страница real-rpg-books.ru загружена{Style.RESET_ALL}")
 
-        # Ищем ссылку с нужным book_id
+        # Увеличиваем время на сайте до 30–240 секунд с вариативным скроллингом
+        stay_time = random.uniform(30, 240)  # Время пребывания на сайте в секундах
+        logger.info(f"{Fore.CYAN}Планируемое время на сайте real-rpg-books.ru: {stay_time:.1f} сек{Style.RESET_ALL}")
+        page_height = driver.execute_script("return document.body.scrollHeight")
+        start_time = time.time()
+        while time.time() - start_time < stay_time - 2:  # Оставляем 2 секунды на переход по ссылке
+            # Случайный скроллинг туда-сюда
+            scroll_distance = random.randint(200, 500)
+            direction = random.choice([-1, 1])  # Вверх или вниз
+            driver.execute_script(f"window.scrollBy(0, {scroll_distance * direction});")
+            time.sleep(random.uniform(0.5, 2))  # Пауза между скроллами
+        
+        # Ищем ссылку с нужным book_id и переходим по ней в конце времени
         target_link_xpath = f"//a[contains(@href, 'https://author.today/reader/{book['book_id']}')]"
         max_attempts = 3
         for attempt in range(max_attempts):
             try:
-                # Прокручиваем страницу вниз, чтобы подгрузился контент
-                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(random.uniform(1, 2))  # Даём время на подгрузку
-                
-                # Пробуем найти элемент через XPath
+                # Прокручиваем к ссылке перед кликом
                 book_link = WebDriverWait(driver, 20).until(
                     EC.presence_of_element_located((By.XPATH, target_link_xpath))
                 )
@@ -455,7 +464,7 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
                     return False
                 time.sleep(random.uniform(2, 5))  # Ждём перед следующей попыткой
         
-        total_time_spent += random.uniform(1, 3)
+        total_time_spent += stay_time  # Учитываем время на сайте
 
         # Ждем загрузки страницы читалки
         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))

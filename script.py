@@ -286,6 +286,7 @@ def navigate_through_filters(driver, book):
         logger.error(f"{Fore.RED}Неизвестная ошибка при выполнении перехода для книги {book_id}: {e}{Style.RESET_ALL}")
         return False
 
+
 def read_chapter_mobile(driver, book, target_book_url, chapter_url, remaining_time):
     try:
         initial_delay = random.uniform(1.5, 3.5)
@@ -298,7 +299,7 @@ def read_chapter_mobile(driver, book, target_book_url, chapter_url, remaining_ti
             return 0
         
         chapter_length = chapter["chapter_length"]  # Длина главы в символах
-        reading_speed = random.uniform(60, 80)  # Скорость чтения в символах/сек (обновленный диапазон)
+        reading_speed = random.uniform(40, 60)  # Скорость чтения в символах/сек (обновленный диапазон)
         calculated_reading_time = chapter_length / reading_speed  # Время в секундах
         
         # Ограничиваем время оставшимся временем сессии и добавляем вариацию

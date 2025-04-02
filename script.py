@@ -201,10 +201,12 @@ user_agents = [
 
 # Настройка драйвера (мобильный режим)
 # Исправим setup_driver, чтобы он принимал конкретный прокси
-def setup_driver(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE, proxy_list=None, retries=0):
+def setup_driver(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE, proxy_list=None, retries=0, user_data_dir=None):
     chrome_options = Options()
-    user_data_dir = tempfile.mkdtemp(prefix="chrome_profile_")
-    chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
+    if user_data_dir:
+        chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
+    else:
+        chrome_options.add_argument(f"--user-data-dir={tempfile.mkdtemp(prefix='chrome_profile_')}")
     mobile_devices = ["iPhone X", "iPhone 8", "iPhone 6", "Pixel 2", "Pixel 2 XL", "Galaxy S5", "iPad", "Nexus 5X"]
     mobile_emulation = {"deviceName": random.choice(mobile_devices)}
     chrome_options.add_experimental_option("mobileEmulation", mobile_emulation)
@@ -218,7 +220,7 @@ def setup_driver(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE, proxy_list=No
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     
     if use_proxies and proxy_list:
-        proxy = proxy_list[0]  # Берем первый (и единственный) элемент из списка
+        proxy = proxy_list[0]
         chrome_options.add_argument(f'--proxy-server={proxy}')
         logger.info(f"{Fore.CYAN}Применяем прокси: {proxy} (попытка {retries + 1}/{MAX_PROXY_RETRIES}){Style.RESET_ALL}")
     else:
@@ -389,12 +391,14 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
         return False
 
     driver = None
+    user_data_dir = None
     current_proxy = None
     try:
         if use_proxies and proxy_list:
             current_proxy = random.choice(proxy_list)
             logger.info(f"{Fore.CYAN}Используем прокси для сессии: {current_proxy}{Style.RESET_ALL}")
-        driver = setup_driver(use_proxies=use_proxies, visual_mode=visual_mode, proxy_list=[current_proxy] if current_proxy else [])
+        user_data_dir = tempfile.mkdtemp(prefix="chrome_profile_")  # Сохраняем путь
+        driver = setup_driver(use_proxies=use_proxies, visual_mode=visual_mode, proxy_list=[current_proxy] if current_proxy else [], user_data_dir=user_data_dir)
         if not driver:
             logger.error(f"{Fore.RED}Сессия {session_id} не запущена из-за проблем с драйвером{Style.RESET_ALL}")
             return False
@@ -565,10 +569,12 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
     finally:
         if driver is not None:
             driver.quit()
+        if user_data_dir and os.path.exists(user_data_dir):
+            shutil.rmtree(user_data_dir)  # Удаляем временную директорию
+            logger.info(f"{Fore.CYAN}Временная директория {user_data_dir} удалена{Style.RESET_ALL}")
         delay = random.uniform(*SESSION_DELAY)
         logger.info(f"{Fore.CYAN}Задержка перед следующей сессией: {delay:.1f} сек{Style.RESET_ALL}")
         time.sleep(delay)
-
 
 
 

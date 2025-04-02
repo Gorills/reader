@@ -578,22 +578,10 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
 
 
 
+
 def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
     current_cycle_read_chapters = set()
     logger.info(f"{Fore.BLUE}Запуск имитации чтения{Style.RESET_ALL}")
-
-    delay = random.uniform(1, 40)  # От 1 до 3 минут (60–180 секунд)
-    logger.info(f"{Fore.CYAN}Задержка перед созданием воркера: {delay:.1f} сек{Style.RESET_ALL}")
-    time.sleep(delay)
-
-    # Получаем воркера один раз при старте
-    worker = get_or_create_worker()
-    if not worker:
-        logger.error(f"{Fore.RED}Не удалось получить воркера. Завершение.{Style.RESET_ALL}")
-        return
-
-    worker_id = worker["id"]
-    logger.info(f"{Fore.GREEN}Воркер {worker_id} запущен с книгой: {worker['book']}{Style.RESET_ALL}")
 
     # Загружаем список прокси один раз и передаем его в сессии
     proxy_list = get_proxy_list() if use_proxies else []
@@ -603,8 +591,25 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
 
     # Флаг для отслеживания завершения цикла
     previous_cycle_completed = True
+    worker = None
+    worker_id = None
 
     while True:
+        # Получаем или обновляем воркера
+        if not worker:
+            logger.info(f"{Fore.CYAN}Попытка получить нового воркера{Style.RESET_ALL}")
+            worker = get_or_create_worker()
+            if not worker:
+                logger.error(f"{Fore.RED}Не удалось получить воркера, повтор через 60 сек{Style.RESET_ALL}")
+                time.sleep(60)  # Задержка перед повторной попыткой
+                continue
+            worker_id = worker["id"]
+            logger.info(f"{Fore.GREEN}Воркер {worker_id} запущен с книгой: {worker['book']}{Style.RESET_ALL}")
+            # Случайная задержка перед началом работы с новым воркером
+            delay = random.uniform(1, 40)
+            logger.info(f"{Fore.CYAN}Задержка перед началом работы воркера: {delay:.1f} сек{Style.RESET_ALL}")
+            time.sleep(delay)
+
         # Получаем актуальные данные воркера
         try:
             response = requests.get(f"{WORKERS_ENDPOINT}{worker_id}/", timeout=10)
@@ -612,7 +617,8 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
             worker = response.json()
         except requests.RequestException as e:
             logger.error(f"{Fore.RED}Ошибка при обновлении данных воркера {worker_id}: {e}{Style.RESET_ALL}")
-            time.sleep(60)  # Ждем перед повторной попыткой
+            worker = None  # Сбрасываем воркера, чтобы получить нового
+            time.sleep(60)
             continue
 
         book_id = worker["book"]
@@ -621,26 +627,25 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
             time.sleep(60)
             continue
 
-        # Получаем данные книги по ID из поля book
-        available_book = fetch_book_by_id(worker['book_id'])
+        # Получаем данные книги
+        available_book = fetch_book_by_id(book_id)
         if not available_book or not available_book["active"]:
             logger.warning(f"{Fore.YELLOW}Книга {book_id} не найдена или не активна, ждем 60 сек{Style.RESET_ALL}")
             time.sleep(60)
             continue
 
-       
         logger.info(f"{Fore.BLUE}Обрабатываем книгу: {available_book['name']} (ID: {available_book['book_id']}) с воркером {worker_id}{Style.RESET_ALL}")
 
-        # Добавляем случайную задержку перед новым чтением, если предыдущий цикл завершен
+        # Случайная задержка перед новым циклом чтения
         if previous_cycle_completed and not current_cycle_read_chapters:
-            delay = random.uniform(60, 180)  # От 1 до 3 минут (60–180 секунд)
+            delay = random.uniform(60, 180)
             logger.info(f"{Fore.CYAN}Задержка перед новым чтением книги: {delay:.1f} сек{Style.RESET_ALL}")
             time.sleep(delay)
 
+        # Запускаем сессию
         success = simulate_session(available_book, 1, worker_id, proxy_list, current_cycle_read_chapters, use_proxies, visual_mode)
 
-
-        # Проверяем, завершился ли цикл полностью
+        # Проверяем завершение цикла
         if success and len(current_cycle_read_chapters) == len(available_book["chapters"]):
             previous_cycle_completed = True
         else:
@@ -649,8 +654,6 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
         if not success:
             logger.warning(f"{Fore.YELLOW}Сессия завершилась с ошибкой, ждем перед следующей попыткой{Style.RESET_ALL}")
             time.sleep(random.uniform(5, 15))
-
-        # Цикл продолжается бесконечно, воркер продолжает проверять book
 
 
 

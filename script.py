@@ -579,6 +579,9 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
 
 
 
+
+
+
 def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
     current_cycle_read_chapters = set()
     logger.info(f"{Fore.BLUE}Запуск имитации чтения{Style.RESET_ALL}")
@@ -628,7 +631,7 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
             continue
 
         # Получаем данные книги
-        available_book = fetch_book_by_id(book_id)
+        available_book = fetch_book_by_id(worker['book_id'])
         if not available_book or not available_book["active"]:
             logger.warning(f"{Fore.YELLOW}Книга {book_id} не найдена или не активна, ждем 60 сек{Style.RESET_ALL}")
             time.sleep(60)
@@ -654,7 +657,6 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
         if not success:
             logger.warning(f"{Fore.YELLOW}Сессия завершилась с ошибкой, ждем перед следующей попыткой{Style.RESET_ALL}")
             time.sleep(random.uniform(5, 15))
-
 
 
 

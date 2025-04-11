@@ -15,6 +15,13 @@ from selenium.webdriver.chrome.options import Options
 import tempfile
 import os
 import shutil
+import json
+import signal
+import sys
+
+
+# Путь к временному файлу для хранения данных о воркере
+WORKER_FILE = "/tmp/worker_data.json"  # Путь в /tmp, чтобы файл удалялся при перезапуске контейнера
 
 # Инициализация colorama для цветного вывода в консоли
 init()
@@ -47,6 +54,10 @@ MAX_PROXY_RETRIES = 3
 
 
 
+
+    
+
+
 # Функция для получения данных о книгах из API
 def fetch_books_data():
     try:
@@ -61,8 +72,6 @@ def fetch_books_data():
 
 # Функция для получения или создания воркера
 def get_or_create_worker():
-    
-    
     
     try:
         response = requests.get(f"{WORKERS_ENDPOINT}assign/", headers=HEADERS, timeout=10)
@@ -81,15 +90,40 @@ def get_or_create_worker():
         return None
 
 
+
+# Функция для сохранения данных о воркере в файл
+def save_worker_data(worker):
+    try:
+        with open(WORKER_FILE, 'w') as f:
+            json.dump(worker, f)
+        logger.info(f"{Fore.GREEN}Данные о воркере сохранены в {WORKER_FILE}{Style.RESET_ALL}")
+    except Exception as e:
+        logger.error(f"{Fore.RED}Ошибка при сохранении данных о воркере: {e}{Style.RESET_ALL}")
+
+# Функция для загрузки данных о воркере из файла
+def load_worker_data():
+    try:
+        if os.path.exists(WORKER_FILE):
+            with open(WORKER_FILE, 'r') as f:
+                worker = json.load(f)
+            logger.info(f"{Fore.GREEN}Данные о воркере загружены из {WORKER_FILE}{Style.RESET_ALL}")
+            return worker
+        else:
+            logger.info(f"{Fore.YELLOW}Файл {WORKER_FILE} не найден{Style.RESET_ALL}")
+            return None
+    except Exception as e:
+        logger.error(f"{Fore.RED}Ошибка при загрузке данных о воркере: {e}{Style.RESET_ALL}")
+        return None
+
 # Функция для обновления статуса воркера
 def update_worker(worker_id, active, busy):
     try:
         url = f"{WORKERS_ENDPOINT}{worker_id}/"
         data = {"busy": busy, "active": active}
-        logger.info(f"Обновляем воркер {worker_id}: busy={busy}")
+        logger.info(f"Обновляем воркер {worker_id}: active={active}, busy={busy}")
         response = requests.patch(url, json=data, headers=HEADERS, timeout=10)
         response.raise_for_status()
-        logger.info(f"{Fore.GREEN}Воркер {worker_id} обновлен: busy={busy}{Style.RESET_ALL}")
+        logger.info(f"{Fore.GREEN}Воркер {worker_id} обновлен: active={active}, busy={busy}{Style.RESET_ALL}")
         return True
     except requests.RequestException as e:
         logger.error(f"{Fore.RED}Ошибка при обновлении воркера {worker_id}: {e}{Style.RESET_ALL}")
@@ -581,6 +615,18 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
 
 
 
+# Функция для обработки остановки контейнера
+def handle_shutdown(signum, frame, worker_id):
+    logger.info(f"{Fore.YELLOW}Получен сигнал {signum}, останавливаем воркера {worker_id}{Style.RESET_ALL}")
+    if worker_id:
+        # Отправляем статус воркера в API: active=False, busy=False
+        update_worker(worker_id, active=False, busy=False)
+        logger.info(f"{Fore.GREEN}Статус воркера {worker_id} обновлен перед остановкой{Style.RESET_ALL}")
+    # Удаляем файл с данными воркера, чтобы при следующем запуске запросить нового
+    if os.path.exists(WORKER_FILE):
+        os.remove(WORKER_FILE)
+        logger.info(f"{Fore.GREEN}Файл {WORKER_FILE} удален{Style.RESET_ALL}")
+    sys.exit(0)
 
 def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
     current_cycle_read_chapters = set()
@@ -597,30 +643,46 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
     worker = None
     worker_id = None
 
+    # Регистрируем обработчик сигналов для SIGTERM и SIGINT
+    signal.signal(signal.SIGTERM, lambda signum, frame: handle_shutdown(signum, frame, worker_id))
+    signal.signal(signal.SIGINT, lambda signum, frame: handle_shutdown(signum, frame, worker_id))
+
     while True:
-        # Получаем или обновляем воркера
+        # Проверяем наличие сохраненного воркера
         if not worker:
-            logger.info(f"{Fore.CYAN}Попытка получить нового воркера{Style.RESET_ALL}")
-            worker = get_or_create_worker()
-            if not worker:
-                logger.error(f"{Fore.RED}Не удалось получить воркера, повтор через 60 сек{Style.RESET_ALL}")
-                time.sleep(60)  # Задержка перед повторной попыткой
-                continue
-            worker_id = worker["id"]
-            logger.info(f"{Fore.GREEN}Воркер {worker_id} запущен с книгой: {worker['book']}{Style.RESET_ALL}")
-            # Случайная задержка перед началом работы с новым воркером
-            delay = random.uniform(1, 40)
-            logger.info(f"{Fore.CYAN}Задержка перед началом работы воркера: {delay:.1f} сек{Style.RESET_ALL}")
-            time.sleep(delay)
+            worker = load_worker_data()
+            if worker and "id" in worker and "book" in worker:
+                worker_id = worker["id"]
+                logger.info(f"{Fore.GREEN}Используем сохраненного воркера {worker_id} с книгой: {worker['book']}{Style.RESET_ALL}")
+            else:
+                logger.info(f"{Fore.CYAN}Попытка получить нового воркера{Style.RESET_ALL}")
+                worker = get_or_create_worker()
+                if not worker:
+                    logger.error(f"{Fore.RED}Не удалось получить воркера, повтор через 60 сек{Style.RESET_ALL}")
+                    time.sleep(60)  # Задержка перед повторной попыткой
+                    continue
+                worker_id = worker["id"]
+                # Сохраняем данные о новом воркере
+                save_worker_data(worker)
+                logger.info(f"{Fore.GREEN}Воркер {worker_id} запущен с книгой: {worker['book']}{Style.RESET_ALL}")
+                # Случайная задержка перед началом работы с новым воркером
+                delay = random.uniform(1, 40)
+                logger.info(f"{Fore.CYAN}Задержка перед началом работы воркера: {delay:.1f} сек{Style.RESET_ALL}")
+                time.sleep(delay)
 
         # Получаем актуальные данные воркера
         try:
             response = requests.get(f"{WORKERS_ENDPOINT}{worker_id}/", timeout=10)
             response.raise_for_status()
             worker = response.json()
+            # Обновляем сохраненные данные воркера
+            save_worker_data(worker)
         except requests.RequestException as e:
             logger.error(f"{Fore.RED}Ошибка при обновлении данных воркера {worker_id}: {e}{Style.RESET_ALL}")
             worker = None  # Сбрасываем воркера, чтобы получить нового
+            if os.path.exists(WORKER_FILE):
+                os.remove(WORKER_FILE)
+                logger.info(f"{Fore.GREEN}Файл {WORKER_FILE} удален из-за ошибки API{Style.RESET_ALL}")
             time.sleep(60)
             continue
 
@@ -660,8 +722,6 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
 
 
 
-
 if __name__ == "__main__":
-
-    # print(fetch_books_data())
     simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE)
+

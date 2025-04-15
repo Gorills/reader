@@ -537,7 +537,7 @@ def simulate_session(book, session_id, worker_id, proxy_list, use_proxies=USE_PR
             logger.info(f"{Fore.GREEN}Глава {chapter['chapter_id']} прочитана за {reading_time:.1f} сек{' (частично)' if not is_fully_read else ''}{Style.RESET_ALL}")
             
             # Вероятность не перейти ко второй главе (70%)
-            if chapters_read_in_session == 1 and random.random() < 0.7:
+            if chapters_read_in_session == 1 and random.random() < 0.5:
                 logger.info(f"{Fore.YELLOW}Пользователь завершил сессию после первой главы{Style.RESET_ALL}")
                 return True
 
@@ -547,7 +547,7 @@ def simulate_session(book, session_id, worker_id, proxy_list, use_proxies=USE_PR
                 return True
 
             # Вероятность завершения сессии после текущей главы (10–15%)
-            dropout_chance = random.uniform(0.1, 0.15)
+            dropout_chance = random.uniform(0.05, 0.10)
             if random.random() < dropout_chance:
                 logger.info(f"{Fore.YELLOW}Пользователь завершил сессию после главы {chapter['chapter_id']}{Style.RESET_ALL}")
                 return True

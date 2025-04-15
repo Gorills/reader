@@ -323,6 +323,7 @@ def navigate_through_filters(driver, book):
         return False
 
 
+
 def read_chapter_mobile(driver, book, target_book_url, chapter_url, remaining_time):
     try:
         initial_delay = random.uniform(1.5, 3.5)
@@ -340,7 +341,7 @@ def read_chapter_mobile(driver, book, target_book_url, chapter_url, remaining_ti
         
         # Вероятность частичного чтения (20% шанс не дочитать главу полностью)
         is_fully_read = True
-        if random.random() < 0.2:
+        if random.random() < 0.1:
             reading_time = min(calculated_reading_time * random.uniform(0.3, 0.7), remaining_time)
             is_fully_read = False
             logger.info(f"{Fore.YELLOW}Частичное чтение главы {chapter_url}: {reading_time:.1f} сек{Style.RESET_ALL}")
@@ -418,7 +419,7 @@ def handle_age_verification(driver):
 
 
 
-def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read_chapters, use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
+def simulate_session(book, session_id, worker_id, proxy_list, use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
     if not book["active"] or book["workers"] <= book["active_workers"]:
         logger.info(f"{Fore.YELLOW}Книга {book['name']} не активна или нет свободных слотов{Style.RESET_ALL}")
         return False
@@ -448,7 +449,6 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
         chapters_read_in_session = 0
         
         logger.info(f"{Fore.MAGENTA}Старт сессии {session_id}, планируемая длительность: {session_duration:.1f} сек{Style.RESET_ALL}")
-        logger.info(f"{Fore.CYAN}Прочитано глав в текущем цикле: {len(current_cycle_read_chapters)} из {len(chapters)}{Style.RESET_ALL}")
         
         # Заходим на real-rpg-books.ru
         driver.get("https://real-rpg-books.ru/")
@@ -506,15 +506,8 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
         if handle_age_verification(driver):
             total_time_spent += random.uniform(1, 3)
 
-        # Выбираем стартовую главу
-        unread_chapters = [i for i in range(len(chapters)) if i not in current_cycle_read_chapters]
-        if not unread_chapters:
-            logger.info(f"{Fore.GREEN}Все главы прочитаны, начинаем цикл заново{Style.RESET_ALL}")
-            current_cycle_read_chapters.clear()
-            unread_chapters = list(range(len(chapters)))
-        
-        chapter_weights = [ch["chapter_distribution"] for ch in chapters]
-        current_chapter_index = random.choices(range(len(chapters)), weights=chapter_weights, k=1)[0]
+        # Всегда начинаем с первой главы
+        current_chapter_index = 0
         
         while total_time_spent < session_duration:
             remaining_time = session_duration - total_time_spent
@@ -535,7 +528,6 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
 
             total_time_spent += reading_time
             chapters_read_in_session += 1
-            current_cycle_read_chapters.add(current_chapter_index)
             chapter["read_time"] += reading_time
             book["read_time"] = int(float(book["read_time"]) + int(reading_time))
             
@@ -544,8 +536,8 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
             
             logger.info(f"{Fore.GREEN}Глава {chapter['chapter_id']} прочитана за {reading_time:.1f} сек{' (частично)' if not is_fully_read else ''}{Style.RESET_ALL}")
             
-            # Вероятность не перейти ко второй главе (80%)
-            if chapters_read_in_session == 1 and random.random() < 0.8:
+            # Вероятность не перейти ко второй главе (70%)
+            if chapters_read_in_session == 1 and random.random() < 0.7:
                 logger.info(f"{Fore.YELLOW}Пользователь завершил сессию после первой главы{Style.RESET_ALL}")
                 return True
 
@@ -560,23 +552,17 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
                 logger.info(f"{Fore.YELLOW}Пользователь завершил сессию после главы {chapter['chapter_id']}{Style.RESET_ALL}")
                 return True
 
-            unread_chapters = [i for i in range(len(chapters)) if i not in current_cycle_read_chapters]
-            if not unread_chapters:
-                logger.info(f"{Fore.GREEN}Все главы прочитаны, начинаем цикл заново{Style.RESET_ALL}")
-                current_cycle_read_chapters.clear()
-                unread_chapters = list(range(len(chapters)))
-
+            # Переход к следующей главе
             next_chapter_index = current_chapter_index + 1
             if next_chapter_index >= len(chapters):
-                next_chapter_index = 0
+                logger.info(f"{Fore.YELLOW}Достигнут конец книги, завершаем сессию{Style.RESET_ALL}")
+                return True
             if go_to_next_chapter(driver):
                 current_chapter_index = next_chapter_index
                 total_time_spent += random.uniform(1, 2)
             else:
-                logger.info(f"{Fore.YELLOW}Нет следующей главы, переходим к первой{Style.RESET_ALL}")
-                current_chapter_index = 0
-                driver.get(f"{target_book_url}/{chapters[0]['chapter_id']}")
-                total_time_spent += random.uniform(1, 3)
+                logger.info(f"{Fore.YELLOW}Не удалось перейти к следующей главе, завершаем сессию{Style.RESET_ALL}")
+                return True
 
         logger.info(f"{Fore.MAGENTA}Сессия {session_id} завершена: прочитано {chapters_read_in_session} глав{Style.RESET_ALL}")
         return True
@@ -596,7 +582,6 @@ def simulate_session(book, session_id, worker_id, proxy_list, current_cycle_read
 
 
 
-
 # Функция для обработки остановки контейнера
 def handle_shutdown(signum, frame, worker_id):
     logger.info(f"{Fore.YELLOW}Получен сигнал {signum}, останавливаем воркера {worker_id}{Style.RESET_ALL}")
@@ -612,7 +597,6 @@ def handle_shutdown(signum, frame, worker_id):
 
 
 def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
-    current_cycle_read_chapters = set()
     logger.info(f"{Fore.BLUE}Запуск имитации чтения{Style.RESET_ALL}")
 
     proxy_list = get_proxy_list() if use_proxies else []
@@ -620,7 +604,6 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
         logger.warning(f"{Fore.YELLOW}Список прокси пуст, продолжаем без прокси{Style.RESET_ALL}")
         use_proxies = False
 
-    previous_cycle_completed = True
     worker = None
     worker_id = None
 
@@ -675,29 +658,23 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
 
         logger.info(f"{Fore.BLUE}Обрабатываем книгу: {available_book['name']} (ID: {available_book['book_id']}) с воркером {worker_id}{Style.RESET_ALL}")
 
-        if previous_cycle_completed and not current_cycle_read_chapters:
-            delay = random.uniform(60, 180)
-            logger.info(f"{Fore.CYAN}Задержка перед новым чтением книги: {delay:.1f} сек{Style.RESET_ALL}")
-            time.sleep(delay)
+        # Случайная задержка перед новой сессией
+        delay = random.uniform(60, 180)
+        logger.info(f"{Fore.CYAN}Задержка перед новой сессией: {delay:.1f} сек{Style.RESET_ALL}")
+        time.sleep(delay)
 
-        # Обновляем список прокси перед каждой сессией
         if use_proxies:
             proxy_list = get_proxy_list()
             if not proxy_list:
                 logger.warning(f"{Fore.YELLOW}Список прокси пуст, продолжаем без прокси{Style.RESET_ALL}")
                 use_proxies = False
 
-        success = simulate_session(available_book, 1, worker_id, proxy_list, current_cycle_read_chapters, use_proxies, visual_mode)
-
-        if success and len(current_cycle_read_chapters) == len(available_book["chapters"]):
-            previous_cycle_completed = True
-        else:
-            previous_cycle_completed = False
+        success = simulate_session(available_book, 1, worker_id, proxy_list, use_proxies, visual_mode)
 
         if not success:
             logger.warning(f"{Fore.YELLOW}Сессия завершилась с ошибкой, обновляем прокси и пробуем снова{Style.RESET_ALL}")
             if use_proxies:
-                proxy_list = get_proxy_list()  # Обновляем прокси при ошибке
+                proxy_list = get_proxy_list()
                 if not proxy_list:
                     logger.error(f"{Fore.RED}Не удалось получить прокси, ждем 60 сек{Style.RESET_ALL}")
                     time.sleep(60)

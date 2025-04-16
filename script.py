@@ -49,7 +49,7 @@ HEADERS = {
 USE_PROXIES = True  # Использовать прокси (True) или нет (False)
 PROXY_LIST = []  # Изначально пустой список прокси, будет обновляться перед каждым циклом
 VISUAL_MODE = False  # True - видимый браузер и одна сессия, False - скрытый режим и консоль
-SESSION_DELAY = (5, 10)  # Диапазон задержки между сессиями (в секундах)
+SESSION_DELAY = (2, 5)  # Диапазон задержки между сессиями (в секундах)
 MAX_PROXY_RETRIES = 3
 
 
@@ -612,6 +612,9 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
 
     while True:
         if not worker:
+            delay = random.uniform(1, 5)
+            logger.info(f"{Fore.CYAN}Задержка перед началом работы воркера: {delay:.1f} сек{Style.RESET_ALL}")
+            time.sleep(delay)
             worker = load_worker_data()
             if worker and "id" in worker and "book" in worker:
                 worker_id = worker["id"]
@@ -626,9 +629,8 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
                 worker_id = worker["id"]
                 save_worker_data(worker)
                 logger.info(f"{Fore.GREEN}Воркер {worker_id} запущен с книгой: {worker['book']}{Style.RESET_ALL}")
-                delay = random.uniform(1, 40)
-                logger.info(f"{Fore.CYAN}Задержка перед началом работы воркера: {delay:.1f} сек{Style.RESET_ALL}")
-                time.sleep(delay)
+                
+                
 
         try:
             response = requests.get(f"{WORKERS_ENDPOINT}{worker_id}/", timeout=10)
@@ -659,7 +661,7 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
         logger.info(f"{Fore.BLUE}Обрабатываем книгу: {available_book['name']} (ID: {available_book['book_id']}) с воркером {worker_id}{Style.RESET_ALL}")
 
         # Случайная задержка перед новой сессией
-        delay = random.uniform(60, 180)
+        delay = random.uniform(5, 40)
         logger.info(f"{Fore.CYAN}Задержка перед новой сессией: {delay:.1f} сек{Style.RESET_ALL}")
         time.sleep(delay)
 

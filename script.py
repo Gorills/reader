@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 # URL API для получения данных
-API_URL = "https://book.profit-platform.ru/api/v1/"
+API_URL = "https://real-rpg-books.ru/api/v1/"
 BOOKS_ENDPOINT = f"{API_URL}books/"
 CHAPTERS_ENDPOINT = f"{API_URL}chapters/"
 WORKERS_ENDPOINT = f"{API_URL}workers/"

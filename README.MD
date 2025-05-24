@@ -19,3 +19,6 @@
 
 # Запуск контейнеров
 # docker compose up --scale reader=1 -d
+
+# docker rm -f reader_reader_1
+# docker compose run -d --name reader_reader_$i -e CONTAINER_NUMBER=$i reader

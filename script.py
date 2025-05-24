@@ -55,7 +55,22 @@ MAX_PROXY_RETRIES = 3
 
 
 
-
+def get_container_number():
+    try:
+        container_number = os.getenv('CONTAINER_NUMBER')
+        if container_number:
+            container_number = int(container_number)
+            logger.info(f"{Fore.GREEN}Порядковый номер контейнера: {container_number}{Style.RESET_ALL}")
+            return container_number
+        else:
+            logger.error(f"{Fore.RED}Переменная окружения CONTAINER_NUMBER не найдена, завершаем работу{Style.RESET_ALL}")
+            return None
+    except ValueError:
+        logger.error(f"{Fore.RED}Переменная CONTAINER_NUMBER не является числом: {container_number}{Style.RESET_ALL}")
+        return None
+    except Exception as e:
+        logger.error(f"{Fore.RED}Ошибка при получении номера контейнера: {e}{Style.RESET_ALL}")
+        return None
     
 
 
@@ -697,5 +712,11 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
                 continue
             time.sleep(random.uniform(5, 15))
 
+
+
+
+
+
 if __name__ == "__main__":
+    get_container_number()
     simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE)

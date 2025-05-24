@@ -18,4 +18,4 @@
 
 
 # Запуск контейнеров
-# docker compose up --scale reader=5 -d
+# docker compose up --scale reader=1 -d

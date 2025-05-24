@@ -612,7 +612,7 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
 
     while True:
         if not worker:
-            delay = random.uniform(1, 5)
+            delay = random.uniform(1, 15)
             logger.info(f"{Fore.CYAN}Задержка перед началом работы воркера: {delay:.1f} сек{Style.RESET_ALL}")
             time.sleep(delay)
             worker = load_worker_data()
@@ -623,8 +623,8 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
                 logger.info(f"{Fore.CYAN}Попытка получить нового воркера{Style.RESET_ALL}")
                 worker = get_or_create_worker()
                 if not worker:
-                    logger.error(f"{Fore.RED}Не удалось получить воркера, повтор через 60 сек{Style.RESET_ALL}")
-                    time.sleep(15)
+                    logger.error(f"{Fore.RED}Не удалось получить воркера, повтор через 10 сек{Style.RESET_ALL}")
+                    time.sleep(10)
                     continue
                 worker_id = worker["id"]
                 save_worker_data(worker)

@@ -86,23 +86,55 @@ def fetch_books_data():
         logger.error(f"{Fore.RED}Ошибка при загрузке данных из API: {e}{Style.RESET_ALL}")
         return []
 
+
+
 # Функция для получения или создания воркера
-def get_or_create_worker():
+def get_or_create_worker(worker_id):
+    """
+    Запрашивает воркер с указанным worker_id через эндпоинт /assign/.
     
+    Args:
+        worker_id (int): ID воркера для запроса.
+    
+    Returns:
+        dict or None: Данные воркера, если он доступен, иначе None.
+    """
     try:
-        response = requests.get(f"{WORKERS_ENDPOINT}assign/", headers=HEADERS, timeout=10)
-        response.raise_for_status()
+        # Формируем URL с параметром worker_id
+        params = {"worker_id": worker_id}
+        response = requests.get(
+            f"{WORKERS_ENDPOINT}assign/",
+            headers=HEADERS,
+            params=params,
+            timeout=10
+        )
+        response.raise_for_status()  # Вызывает исключение для HTTP-ошибок (4xx, 5xx)
+        
         worker = response.json()
         
         if worker and "id" in worker:
-            logger.info(f"{Fore.GREEN}Успешно зарезервирован воркер {worker['id']} с книгой: {worker['book']}{Style.RESET_ALL}")
+            logger.info(
+                f"{Fore.GREEN}Успешно получен воркер worker_id={worker['worker_id']} "
+                f"(ID={worker['id']}) с книгой: {worker['book']}{Style.RESET_ALL}"
+            )
+            update_worker(worker["id"], active=False, busy=True)
             return worker
         else:
-            logger.warning(f"{Fore.YELLOW}Сервер не вернул свободного воркера{Style.RESET_ALL}")
+            logger.warning(
+                f"{Fore.YELLOW}Сервер не вернул воркера для worker_id={worker_id}{Style.RESET_ALL}"
+            )
             return None
             
+    except requests.HTTPError as e:
+        logger.error(
+            f"{Fore.RED}HTTP-ошибка при запросе воркера worker_id={worker_id}: "
+            f"{response.status_code} {response.text}{Style.RESET_ALL}"
+        )
+        return None
     except requests.RequestException as e:
-        logger.error(f"{Fore.RED}Ошибка при запросе воркера через /assign/: {e}{Style.RESET_ALL}")
+        logger.error(
+            f"{Fore.RED}Ошибка при запросе воркера worker_id={worker_id}: {e}{Style.RESET_ALL}"
+        )
         return None
 
 
@@ -652,7 +684,7 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
                 logger.info(f"{Fore.GREEN}Используем сохраненного воркера {worker_id}{Style.RESET_ALL}")
             else:
                 logger.info(f"{Fore.CYAN}Попытка получить нового воркера{Style.RESET_ALL}")
-                worker = get_or_create_worker()
+                worker = get_or_create_worker(get_container_number())
                 if not worker:
                     logger.error(f"{Fore.RED}Не удалось получить воркера, повтор через 10 сек{Style.RESET_ALL}")
                     time.sleep(10)

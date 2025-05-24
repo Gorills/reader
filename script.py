@@ -22,6 +22,7 @@ import sys
 
 # Путь к временному файлу для хранения данных о воркере
 WORKER_FILE = "/tmp/worker_data.json"  # Путь в /tmp, чтобы файл удалялся при перезапуске контейнера
+PROXY_API_URL = "https://proxy-bunker.com/api2.php"
 
 # Инициализация colorama для цветного вывода в консоли
 init()
@@ -201,26 +202,34 @@ def fetch_chapter_by_id(chapter_id):
 
 # Функция для получения списка прокси
 def get_proxy_list():
-    api_url = "https://proxy-bunker.com/api2.php"
-    try:
-        response = requests.get(api_url, timeout=10)
-        response.raise_for_status()
-        proxy_list = response.text.strip().split('\n')
-        proxy_list = [f"http://{proxy}" if not proxy.startswith("http") else proxy for proxy in proxy_list]
-        additional_proxies = []
-        proxy_list.extend(additional_proxies)
-        logger.info(f"{Fore.GREEN}Получено {len(proxy_list)} прокси из API и дополнительного списка{Style.RESET_ALL}")
-        return proxy_list
-    except requests.RequestException as e:
-        logger.error(f"{Fore.RED}Ошибка при получении списка прокси: {e}{Style.RESET_ALL}")
-        return []
+    max_attempts = 5
+    attempt = 0
+    while attempt < max_attempts:
+        try:
+            response = requests.get(PROXY_API_URL, timeout=10)
+            response.raise_for_status()
+            proxy_list = response.text.strip().split('\n')
+            proxy_list = [f"http://{proxy}" if not proxy.startswith("http") else proxy for proxy in proxy_list]
+            if not proxy_list:
+                logger.warning(f"{Fore.YELLOW}Список прокси пуст, повторная попытка через 10 сек (попытка {attempt + 1}/{max_attempts}){Style.RESET_ALL}")
+                attempt += 1
+                time.sleep(10)
+                continue
+            logger.info(f"{Fore.GREEN}Получено {len(proxy_list)} прокси{Style.RESET_ALL}")
+            return proxy_list
+        except requests.RequestException as e:
+            logger.error(f"{Fore.RED}Ошибка при получении списка прокси: {e} (попытка {attempt + 1}/{max_attempts}){Style.RESET_ALL}")
+            attempt += 1
+            time.sleep(10)
+    
+    logger.error(f"{Fore.RED}Не удалось получить прокси после {max_attempts} попыток{Style.RESET_ALL}")
+    return []
+
+
+
+
 
 # Конфигурация
-
-
-
-
-
 # Список user-agents для мобильного режима
 user_agents = [
     "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
@@ -599,10 +608,10 @@ def handle_shutdown(signum, frame, worker_id):
 def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
     logger.info(f"{Fore.BLUE}Запуск имитации чтения{Style.RESET_ALL}")
 
-    proxy_list = get_proxy_list() if use_proxies else []
-    if use_proxies and not proxy_list:
-        logger.warning(f"{Fore.YELLOW}Список прокси пуст, продолжаем без прокси{Style.RESET_ALL}")
-        use_proxies = False
+    # Прокси обязательны
+    if not use_proxies:
+        logger.error(f"{Fore.RED}Прокси обязательны для работы скрипта{Style.RESET_ALL}")
+        return
 
     worker = None
     worker_id = None
@@ -611,6 +620,13 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
     signal.signal(signal.SIGINT, lambda signum, frame: handle_shutdown(signum, frame, worker_id))
 
     while True:
+        # Получаем список прокси
+        proxy_list = get_proxy_list()
+        if not proxy_list:
+            logger.error(f"{Fore.RED}Не удалось получить прокси, повтор через 60 сек{Style.RESET_ALL}")
+            time.sleep(60)
+            continue
+
         if not worker:
             delay = random.uniform(1, 15)
             logger.info(f"{Fore.CYAN}Задержка перед началом работы воркера: {delay:.1f} сек{Style.RESET_ALL}")
@@ -629,8 +645,6 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
                 worker_id = worker["id"]
                 save_worker_data(worker)
                 logger.info(f"{Fore.GREEN}Воркер {worker_id} запущен с книгой: {worker['book']}{Style.RESET_ALL}")
-                
-                
 
         try:
             response = requests.get(f"{WORKERS_ENDPOINT}{worker_id}/", timeout=10)
@@ -665,25 +679,23 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
         logger.info(f"{Fore.CYAN}Задержка перед новой сессией: {delay:.1f} сек{Style.RESET_ALL}")
         time.sleep(delay)
 
-        if use_proxies:
-            proxy_list = get_proxy_list()
-            if not proxy_list:
-                logger.warning(f"{Fore.YELLOW}Список прокси пуст, продолжаем без прокси{Style.RESET_ALL}")
-                use_proxies = False
+        # Проверяем, что прокси все еще доступны
+        proxy_list = get_proxy_list()
+        if not proxy_list:
+            logger.error(f"{Fore.RED}Не удалось получить прокси, повтор через 60 сек{Style.RESET_ALL}")
+            time.sleep(60)
+            continue
 
-        success = simulate_session(available_book, 1, worker_id, proxy_list, use_proxies, visual_mode)
+        success = simulate_session(available_book, 1, worker_id, proxy_list, use_proxies=True, visual_mode=visual_mode)
 
         if not success:
             logger.warning(f"{Fore.YELLOW}Сессия завершилась с ошибкой, обновляем прокси и пробуем снова{Style.RESET_ALL}")
-            if use_proxies:
-                proxy_list = get_proxy_list()
-                if not proxy_list:
-                    logger.error(f"{Fore.RED}Не удалось получить прокси, ждем 60 сек{Style.RESET_ALL}")
-                    time.sleep(60)
-                    continue
+            proxy_list = get_proxy_list()
+            if not proxy_list:
+                logger.error(f"{Fore.RED}Не удалось получить прокси, ждем 60 сек{Style.RESET_ALL}")
+                time.sleep(60)
+                continue
             time.sleep(random.uniform(5, 15))
-
 
 if __name__ == "__main__":
     simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE)
-

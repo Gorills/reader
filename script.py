@@ -383,7 +383,7 @@ def navigate_through_filters(driver, book):
 def read_chapter_mobile(driver, book, target_book_url, chapter_url, remaining_time):
     try:
         initial_delay = random.uniform(1.5, 3.5)
-        time.sleep(initial_delay)
+        # time.sleep(initial_delay)
         
         # Находим главу
         chapter = next((ch for ch in book["chapters"] if f"{target_book_url}/{ch['chapter_id']}" == chapter_url), None)
@@ -395,10 +395,10 @@ def read_chapter_mobile(driver, book, target_book_url, chapter_url, remaining_ti
         reading_speed = random.uniform(40, 60)
         calculated_reading_time = chapter_length / reading_speed
         
-        # Вероятность частичного чтения (30% шанс не дочитать главу полностью)
+        # Вероятность частичного чтения (70% шанс не дочитать главу полностью)
         is_fully_read = True
-        if random.random() < 0.3:
-            reading_time = min(calculated_reading_time * random.uniform(0.1, 0.5), remaining_time)
+        if random.random() < 0.7:
+            reading_time = min(calculated_reading_time * random.uniform(0.1, 0.3), remaining_time)
             is_fully_read = False
             logger.info(f"{Fore.YELLOW}Частичное чтение главы {chapter_url}: {reading_time:.1f} сек{Style.RESET_ALL}")
         else:
@@ -476,9 +476,37 @@ def handle_age_verification(driver):
 
 
 def simulate_session(book, session_id, worker_id, proxy_list, use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
-    if not book["active"] or book["workers"] <= book["active_workers"]:
-        logger.info(f"{Fore.YELLOW}Книга {book['name']} не активна или нет свободных слотов{Style.RESET_ALL}")
+
+
+    # Обновляем данные о воркере перед началом сессии
+    try:
+        response = requests.get(f"{WORKERS_ENDPOINT}{worker_id}/", headers=HEADERS, timeout=10)
+        response.raise_for_status()
+        worker = response.json()
+        logger.info(f"{Fore.GREEN}Данные воркера {worker_id} обновлены перед сессией {session_id}{Style.RESET_ALL}")
+    except requests.RequestException as e:
+        logger.error(f"{Fore.RED}Ошибка при обновлении данных воркера {worker_id}: {e}{Style.RESET_ALL}")
+        return False  # Завершаем сессию при ошибке обновления
+
+    # Проверяем, назначена ли книга воркеру
+    book_id = worker.get("book_id")
+    if not book_id:
+        logger.warning(f"{Fore.YELLOW}У воркера {worker_id} нет назначенной книги{Style.RESET_ALL}")
         return False
+
+    # Загружаем актуальные данные о книге
+    book = fetch_book_by_id(book_id)
+    if not book or not book["active"]:
+        logger.warning(f"{Fore.YELLOW}Книга {book_id} не найдена или не активна{Style.RESET_ALL}")
+        return False
+
+    logger.info(f"{Fore.BLUE}Сессия {session_id}: Обрабатываем книгу {book['name']} (ID: {book['book_id']}) с воркером {worker_id}{Style.RESET_ALL}")
+
+
+    if not book["active"]:
+        logger.info(f"{Fore.YELLOW}Книга {book['name']} не активна{Style.RESET_ALL}")
+        return False
+
 
     use_filters = random.randint(1, 100) <= book["page_percentage"]
     session_duration = random.uniform(book["min_session_time"], book["max_session_time"])
@@ -516,7 +544,7 @@ def simulate_session(book, session_id, worker_id, proxy_list, use_proxies=USE_PR
         logger.info(f"{Fore.CYAN}Страница real-rpg-books.ru загружена{Style.RESET_ALL}")
 
         # Время на сайте
-        stay_time = random.uniform(10, 20)
+        stay_time = random.uniform(3, 5)
         logger.info(f"{Fore.CYAN}Планируемое время на сайте real-rpg-books.ru: {stay_time:.1f} сек{Style.RESET_ALL}")
         page_height = driver.execute_script("return document.body.scrollHeight")
         start_time = time.time()
@@ -632,9 +660,7 @@ def simulate_session(book, session_id, worker_id, proxy_list, use_proxies=USE_PR
         if user_data_dir and os.path.exists(user_data_dir):
             shutil.rmtree(user_data_dir)
             logger.info(f"{Fore.CYAN}Временная директория {user_data_dir} удалена{Style.RESET_ALL}")
-        delay = random.uniform(*SESSION_DELAY)
-        logger.info(f"{Fore.CYAN}Задержка перед следующей сессией: {delay:.1f} сек{Style.RESET_ALL}")
-        time.sleep(delay)
+        
 
 
 
@@ -652,6 +678,9 @@ def handle_shutdown(signum, frame, worker_id):
     sys.exit(0)
 
 
+
+
+
 def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
     logger.info(f"{Fore.BLUE}Запуск имитации чтения{Style.RESET_ALL}")
 
@@ -660,8 +689,13 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
         logger.error(f"{Fore.RED}Прокси обязательны для работы скрипта{Style.RESET_ALL}")
         return
 
-    worker = None
-    worker_id = None
+    container_number = get_container_number()
+    if not container_number:
+        logger.error(f"{Fore.RED}Не удалось определить номер контейнера, завершаем работу{Style.RESET_ALL}")
+        return
+    
+    worker = get_or_create_worker(get_container_number())
+    worker_id = worker["id"]
 
     signal.signal(signal.SIGTERM, lambda signum, frame: handle_shutdown(signum, frame, worker_id))
     signal.signal(signal.SIGINT, lambda signum, frame: handle_shutdown(signum, frame, worker_id))
@@ -673,67 +707,10 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
             logger.error(f"{Fore.RED}Не удалось получить прокси, повтор через 60 сек{Style.RESET_ALL}")
             time.sleep(60)
             continue
-
-        if not worker:
-            delay = random.uniform(1, 15)
-            logger.info(f"{Fore.CYAN}Задержка перед началом работы воркера: {delay:.1f} сек{Style.RESET_ALL}")
-            time.sleep(delay)
-            worker = load_worker_data()
-            if worker and "id" in worker and "book" in worker:
-                worker_id = worker["id"]
-                logger.info(f"{Fore.GREEN}Используем сохраненного воркера {worker_id}{Style.RESET_ALL}")
-            else:
-                logger.info(f"{Fore.CYAN}Попытка получить нового воркера{Style.RESET_ALL}")
-                worker = get_or_create_worker(get_container_number())
-                if not worker:
-                    logger.error(f"{Fore.RED}Не удалось получить воркера, повтор через 10 сек{Style.RESET_ALL}")
-                    time.sleep(10)
-                    continue
-                worker_id = worker["id"]
-                save_worker_data(worker)
-                logger.info(f"{Fore.GREEN}Воркер {worker_id} запущен с книгой: {worker['book']}{Style.RESET_ALL}")
-
-        try:
-            response = requests.get(f"{WORKERS_ENDPOINT}{worker_id}/", timeout=10)
-            response.raise_for_status()
-            worker = response.json()
-            save_worker_data(worker)
-        except requests.RequestException as e:
-            logger.error(f"{Fore.RED}Ошибка при обновлении данных воркера {worker_id}: {e}{Style.RESET_ALL}")
-            worker = None
-            if os.path.exists(WORKER_FILE):
-                os.remove(WORKER_FILE)
-                logger.info(f"{Fore.GREEN}Файл {WORKER_FILE} удален из-за ошибки API{Style.RESET_ALL}")
-            time.sleep(60)
-            continue
-
-        book_id = worker["book"]
-        if not book_id:
-            logger.info(f"{Fore.YELLOW}У воркера {worker_id} нет книги, ждем 60 сек{Style.RESET_ALL}")
-            time.sleep(60)
-            continue
-
-        available_book = fetch_book_by_id(worker['book_id'])
-        if not available_book or not available_book["active"]:
-            logger.warning(f"{Fore.YELLOW}Книга {book_id} не найдена или не активна, ждем 60 сек{Style.RESET_ALL}")
-            time.sleep(60)
-            continue
-
-        logger.info(f"{Fore.BLUE}Обрабатываем книгу: {available_book['name']} (ID: {available_book['book_id']}) с воркером {worker_id}{Style.RESET_ALL}")
-
-        # Случайная задержка перед новой сессией
-        delay = random.uniform(5, 40)
-        logger.info(f"{Fore.CYAN}Задержка перед новой сессией: {delay:.1f} сек{Style.RESET_ALL}")
-        time.sleep(delay)
-
-        # Проверяем, что прокси все еще доступны
-        proxy_list = get_proxy_list()
-        if not proxy_list:
-            logger.error(f"{Fore.RED}Не удалось получить прокси, повтор через 60 сек{Style.RESET_ALL}")
-            time.sleep(60)
-            continue
-
-        success = simulate_session(available_book, 1, worker_id, proxy_list, use_proxies=True, visual_mode=visual_mode)
+        
+        
+        # Запускаем сессию с воркером
+        success = simulate_session(None, 1, worker_id, proxy_list, use_proxies=True, visual_mode=visual_mode)
 
         if not success:
             logger.warning(f"{Fore.YELLOW}Сессия завершилась с ошибкой, обновляем прокси и пробуем снова{Style.RESET_ALL}")
@@ -746,9 +723,5 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
 
 
 
-
-
-
 if __name__ == "__main__":
-    get_container_number()
     simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE)

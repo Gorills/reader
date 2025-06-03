@@ -380,10 +380,10 @@ def navigate_through_filters(driver, book):
 
 
 
+
 def read_chapter_mobile(driver, book, target_book_url, chapter_url, remaining_time):
     try:
         initial_delay = random.uniform(1.5, 3.5)
-        # time.sleep(initial_delay)
         
         # Находим главу
         chapter = next((ch for ch in book["chapters"] if f"{target_book_url}/{ch['chapter_id']}" == chapter_url), None)
@@ -395,14 +395,26 @@ def read_chapter_mobile(driver, book, target_book_url, chapter_url, remaining_ti
         reading_speed = random.uniform(40, 60)
         calculated_reading_time = chapter_length / reading_speed
         
-        # Вероятность частичного чтения (70% шанс не дочитать главу полностью)
-        is_fully_read = True
-        if random.random() < 0.7:
-            reading_time = min(calculated_reading_time * random.uniform(0.1, 0.3), remaining_time)
-            is_fully_read = False
-            logger.info(f"{Fore.YELLOW}Частичное чтение главы {chapter_url}: {reading_time:.1f} сек{Style.RESET_ALL}")
-        else:
+        # Проверяем настройку read_all у воркера
+        response = requests.get(f"{WORKERS_ENDPOINT}{book['worker_id']}/", headers=HEADERS, timeout=10)
+        response.raise_for_status()
+        worker = response.json()
+        read_all = worker.get("read_all", False)
+
+        # Если read_all = True, читаем главу полностью
+        if read_all:
             reading_time = min(calculated_reading_time * random.uniform(0.9, 1.1), remaining_time)
+            is_fully_read = True
+            logger.info(f"{Fore.YELLOW}Чтение главы {chapter_url} полностью (read_all=True): {reading_time:.1f} сек{Style.RESET_ALL}")
+        else:
+            # Вероятность частичного чтения (70% шанс не дочитать главу полностью)
+            is_fully_read = True
+            if random.random() < 0.7:
+                reading_time = min(calculated_reading_time * random.uniform(0.1, 0.3), remaining_time)
+                is_fully_read = False
+                logger.info(f"{Fore.YELLOW}Частичное чтение главы {chapter_url}: {reading_time:.1f} сек{Style.RESET_ALL}")
+            else:
+                reading_time = min(calculated_reading_time * random.uniform(0.9, 1.1), remaining_time)
         
         logger.info(f"{Fore.YELLOW}Начато чтение главы: {chapter_url}, объем: {chapter_length} символов, скорость: {reading_speed:.1f} сим/сек, планируемое время: {reading_time:.1f} сек{Style.RESET_ALL}")
         
@@ -436,6 +448,8 @@ def read_chapter_mobile(driver, book, target_book_url, chapter_url, remaining_ti
     except Exception as e:
         logger.error(f"{Fore.RED}Ошибка при чтении главы {chapter_url}: {e}{Style.RESET_ALL}")
         return 0, False
+
+        
 
 
 # Переход к следующей главе через кнопку

@@ -380,10 +380,10 @@ def navigate_through_filters(driver, book):
 
 
 
-
-def read_chapter_mobile(driver, book, target_book_url, chapter_url, remaining_time):
+def read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, remaining_time):
     try:
         initial_delay = random.uniform(1.5, 3.5)
+        # time.sleep(initial_delay)
         
         # Находим главу
         chapter = next((ch for ch in book["chapters"] if f"{target_book_url}/{ch['chapter_id']}" == chapter_url), None)
@@ -394,12 +394,6 @@ def read_chapter_mobile(driver, book, target_book_url, chapter_url, remaining_ti
         chapter_length = chapter["chapter_length"]
         reading_speed = random.uniform(40, 60)
         calculated_reading_time = chapter_length / reading_speed
-        
-        # Проверяем настройку read_all у воркера
-        response = requests.get(f"{WORKERS_ENDPOINT}{book['worker_id']}/", headers=HEADERS, timeout=10)
-        response.raise_for_status()
-        worker = response.json()
-        read_all = worker.get("read_all", False)
 
         # Если read_all = True, читаем главу полностью
         if read_all:
@@ -450,8 +444,6 @@ def read_chapter_mobile(driver, book, target_book_url, chapter_url, remaining_ti
         return 0, False
 
 
-
-
 # Переход к следующей главе через кнопку
 def go_to_next_chapter(driver):
     try:
@@ -489,7 +481,9 @@ def handle_age_verification(driver):
 
 
 
-def simulate_session(book, session_id, worker_id, proxy_list, use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
+def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
+
+
     # Обновляем данные о воркере перед началом сессии
     try:
         response = requests.get(f"{WORKERS_ENDPOINT}{worker_id}/", headers=HEADERS, timeout=10)
@@ -512,13 +506,14 @@ def simulate_session(book, session_id, worker_id, proxy_list, use_proxies=USE_PR
         logger.warning(f"{Fore.YELLOW}Книга {book_id} не найдена или не активна{Style.RESET_ALL}")
         return False
 
-    # Проверяем настройку read_all
     read_all = worker.get("read_all", False)
-    logger.info(f"{Fore.BLUE}Сессия {session_id}: Обрабатываем книгу {book['name']} (ID: {book['book_id']}) с воркером {worker_id}, read_all={read_all}{Style.RESET_ALL}")
+    logger.info(f"{Fore.BLUE}Сессия {session_id}: Обрабатываем книгу {book['name']} (ID: {book['book_id']}) с воркером {worker_id}{Style.RESET_ALL}")
+
 
     if not book["active"]:
         logger.info(f"{Fore.YELLOW}Книга {book['name']} не активна{Style.RESET_ALL}")
         return False
+
 
     use_filters = random.randint(1, 100) <= book["page_percentage"]
     session_duration = random.uniform(book["min_session_time"], book["max_session_time"])
@@ -616,12 +611,14 @@ def simulate_session(book, session_id, worker_id, proxy_list, use_proxies=USE_PR
             WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
             logger.info(f"{Fore.CYAN}Загружена страница главы: {chapter_url}{Style.RESET_ALL}")
 
+
             # Если read_all = True, читаем главу полностью, иначе используем стандартную логику
             if read_all:
-                reading_time, is_fully_read = read_chapter_mobile(driver, book, target_book_url, chapter_url, remaining_time)
-                is_fully_read = True  # Принудительно устанавливаем полное чтение
+                logger.info(f"{Fore.BLUE}Сессия {session_id}: Обрабатываем книгу {book['name']} (ID: {book['book_id']}) с воркером {worker_id}, read_all={read_all}{Style.RESET_ALL}")
+                reading_time, is_fully_read = read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, remaining_time)
+               
             else:
-                reading_time, is_fully_read = read_chapter_mobile(driver, book, target_book_url, chapter_url, remaining_time)
+                reading_time, is_fully_read = read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, remaining_time)
             
             if reading_time == 0:
                 logger.warning(f"{Fore.YELLOW}Ошибка чтения главы {chapter_url}, завершаем сессию для перезапуска с новым прокси{Style.RESET_ALL}")
@@ -652,7 +649,6 @@ def simulate_session(book, session_id, worker_id, proxy_list, use_proxies=USE_PR
                     return True
                 continue
 
-            # Стандартная логика прерывания (если read_all = False)
             # Вероятность не перейти ко второй главе (80%)
             if chapters_read_in_session == 1 and random.random() < 0.80:
                 logger.info(f"{Fore.YELLOW}Пользователь завершил сессию после первой главы{Style.RESET_ALL}")
@@ -663,7 +659,7 @@ def simulate_session(book, session_id, worker_id, proxy_list, use_proxies=USE_PR
                 logger.info(f"{Fore.YELLOW}Глава {chapter['chapter_id']} прочитана частично, завершаем сессию{Style.RESET_ALL}")
                 return True
 
-            # Вероятность завершения сессии после текущей главы (20–30%)
+            # Вероятность завершения сессии после текущей главы (10–15%)
             dropout_chance = random.uniform(0.20, 0.30)
             if random.random() < dropout_chance:
                 logger.info(f"{Fore.YELLOW}Пользователь завершил сессию после главы {chapter['chapter_id']}{Style.RESET_ALL}")
@@ -693,6 +689,7 @@ def simulate_session(book, session_id, worker_id, proxy_list, use_proxies=USE_PR
         if user_data_dir and os.path.exists(user_data_dir):
             shutil.rmtree(user_data_dir)
             logger.info(f"{Fore.CYAN}Временная директория {user_data_dir} удалена{Style.RESET_ALL}")
+        
 
 
 
@@ -742,7 +739,7 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
         
         
         # Запускаем сессию с воркером
-        success = simulate_session(None, 1, worker_id, proxy_list, use_proxies=True, visual_mode=visual_mode)
+        success = simulate_session(1, worker_id, proxy_list, use_proxies=True, visual_mode=visual_mode)
 
         if not success:
             logger.warning(f"{Fore.YELLOW}Сессия завершилась с ошибкой, обновляем прокси и пробуем снова{Style.RESET_ALL}")

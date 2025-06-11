@@ -480,10 +480,7 @@ def handle_age_verification(driver):
     
 
 
-
 def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
-
-
     # Обновляем данные о воркере перед началом сессии
     try:
         response = requests.get(f"{WORKERS_ENDPOINT}{worker_id}/", headers=HEADERS, timeout=10)
@@ -492,7 +489,7 @@ def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES,
         logger.info(f"{Fore.GREEN}Данные воркера {worker_id} обновлены перед сессией {session_id}{Style.RESET_ALL}")
     except requests.RequestException as e:
         logger.error(f"{Fore.RED}Ошибка при обновлении данных воркера {worker_id}: {e}{Style.RESET_ALL}")
-        return False  # Завершаем сессию при ошибке обновления
+        return False
 
     # Проверяем, назначена ли книга воркеру
     book_id = worker.get("book_id")
@@ -502,26 +499,33 @@ def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES,
 
     # Загружаем актуальные данные о книге
     book = fetch_book_by_id(book_id)
-    if not book or not book["active"]:
-        logger.warning(f"{Fore.YELLOW}Книга {book_id} не найдена или не активна{Style.RESET_ALL}")
+    if not book or "chapters" not in book or not book["active"]:
+        logger.warning(f"{Fore.YELLOW}Книга {book_id} не найдена, не активна или не содержит глав{Style.RESET_ALL}")
         return False
 
     read_all = worker.get("read_all", False)
-    logger.info(f"{Fore.BLUE}Сессия {session_id}: Обрабатываем книгу {book['name']} (ID: {book['book_id']}) с воркером {worker_id}{Style.RESET_ALL}")
-
+    logger.info(f"{Fore.BLUE}Сессия {session_id}: Обрабатываем книгу {book['name']} (ID: {book['book_id']}), read_all={read_all}{Style.RESET_ALL}")
 
     if not book["active"]:
         logger.info(f"{Fore.YELLOW}Книга {book['name']} не активна{Style.RESET_ALL}")
         return False
 
-
     use_filters = random.randint(1, 100) <= book["page_percentage"]
-    session_duration = random.uniform(book["min_session_time"], book["max_session_time"])
     target_book_url = f"https://author.today/reader/{book['book_id']}"
     chapters = [ch for ch in book["chapters"] if ch["active"]]
     if not chapters:
         logger.warning(f"{Fore.YELLOW}Нет активных глав для книги {book['name']}{Style.RESET_ALL}")
         return False
+
+    # Логируем количество активных глав
+    logger.info(f"{Fore.CYAN}Количество активных глав в книге {book['book_id']}: {len(chapters)}{Style.RESET_ALL}")
+
+    # Рассчитываем общее время сессии на основе количества символов в главах
+    reading_speed = random.uniform(40, 60)  # Символов в секунду
+    total_session_time = sum(ch["chapter_length"] / reading_speed * random.uniform(0.9, 1.1) for ch in chapters if "chapter_length" in ch and ch["chapter_length"] > 0)
+    if len(chapters) > 1:
+        total_session_time += (len(chapters) - 1) * random.uniform(1, 2)  # Время переходов между главами
+    logger.info(f"{Fore.MAGENTA}Сессия {session_id}: Рассчитанное время сессии: {total_session_time:.1f} сек (скорость чтения: {reading_speed:.1f} сим/сек){Style.RESET_ALL}")
 
     driver = None
     user_data_dir = None
@@ -538,15 +542,15 @@ def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES,
 
         total_time_spent = 0
         chapters_read_in_session = 0
-        
-        logger.info(f"{Fore.MAGENTA}Старт сессии {session_id}, планируемая длительность: {session_duration:.1f} сек{Style.RESET_ALL}")
-        
+
+        logger.info(f"{Fore.MAGENTA}Старт сессии {session_id}, планируемая длительность: {total_session_time:.1f} сек{Style.RESET_ALL}")
+
         # Заходим на real-rpg-books.ru
         driver.get("https://real-rpg-books.ru/")
         if not check_cloudflare(driver):
             logger.error(f"{Fore.RED}Не удалось пройти Cloudflare на real-rpg-books.ru{Style.RESET_ALL}")
             return False
-        
+
         WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         logger.info(f"{Fore.CYAN}Страница real-rpg-books.ru загружена{Style.RESET_ALL}")
 
@@ -560,7 +564,7 @@ def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES,
             direction = random.choice([-1, 1])
             driver.execute_script(f"window.scrollBy(0, {scroll_distance * direction});")
             time.sleep(random.uniform(0.5, 2))
-        
+
         # Переход по ссылке
         target_link_xpath = f"//a[contains(@href, 'https://author.today/reader/{book['book_id']}/?utm_source=realrpg&utm_medium=referral&utm_campaign=book_link')]"
         max_attempts = 3
@@ -587,83 +591,72 @@ def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES,
                     logger.error(f"{Fore.RED}Ссылка для книги {book['book_id']} не найдена{Style.RESET_ALL}")
                     return False
                 time.sleep(random.uniform(2, 5))
-        
+
         total_time_spent += stay_time
         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         if not check_cloudflare(driver):
             logger.error(f"{Fore.RED}Не удалось пройти Cloudflare на странице читалки{Style.RESET_ALL}")
             return False
-        
+
         if handle_age_verification(driver):
             total_time_spent += random.uniform(1, 3)
 
         # Всегда начинаем с первой главы
         current_chapter_index = 0
-        
-        while total_time_spent < session_duration:
-            remaining_time = session_duration - total_time_spent
-            if remaining_time < book["min_reading_time"]:
-                break
 
+        while current_chapter_index < len(chapters):
             chapter = chapters[current_chapter_index]
             chapter_url = f"{target_book_url}/{chapter['chapter_id']}"
+
+            # Проверяем корректность chapter_length
+            if "chapter_length" not in chapter or chapter["chapter_length"] <= 0:
+                logger.error(f"{Fore.RED}Глава {chapter['chapter_id']} не содержит корректное значение chapter_length{Style.RESET_ALL}")
+                return False
+
             driver.get(chapter_url)
             WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
             logger.info(f"{Fore.CYAN}Загружена страница главы: {chapter_url}{Style.RESET_ALL}")
 
-
-            # Если read_all = True, читаем главу полностью, иначе используем стандартную логику
-            if read_all:
-                logger.info(f"{Fore.BLUE}Сессия {session_id}: Обрабатываем книгу {book['name']} (ID: {book['book_id']}) с воркером {worker_id}, read_all={read_all}{Style.RESET_ALL}")
-                reading_time, is_fully_read = read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, remaining_time)
-               
-            else:
-                reading_time, is_fully_read = read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, remaining_time)
-            
+            # Читаем главу
+            reading_time, is_fully_read = read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, float('inf'))
             if reading_time == 0:
-                logger.warning(f"{Fore.YELLOW}Ошибка чтения главы {chapter_url}, завершаем сессию для перезапуска с новым прокси{Style.RESET_ALL}")
-                return False  # Завершаем сессию для перезапуска с новым прокси
+                logger.warning(f"{Fore.YELLOW}Ошибка чтения главы {chapter_url}, пробуем новый прокси{Style.RESET_ALL}")
+                proxy_list = get_proxy_list()
+                if not proxy_list:
+                    logger.error(f"{Fore.RED}Не удалось получить новый список прокси{Style.RESET_ALL}")
+                    return False
+                current_proxy = random.choice(proxy_list)
+                driver.quit()
+                driver = setup_driver(use_proxies=True, visual_mode=visual_mode, proxy_list=[current_proxy], user_data_dir=user_data_dir)
+                continue
 
             total_time_spent += reading_time
             chapters_read_in_session += 1
             chapter["read_time"] += reading_time
             book["read_time"] = int(float(book["read_time"]) + int(reading_time))
-            
+
             update_book(book["id"], read_time_delta=reading_time)
             update_chapter(chapter["id"], read_time_delta=reading_time)
-            
+
             logger.info(f"{Fore.GREEN}Глава {chapter['chapter_id']} прочитана за {reading_time:.1f} сек{' (частично)' if not is_fully_read else ''}{Style.RESET_ALL}")
-            
-            # Если read_all = True, игнорируем все условия прерывания
-            if read_all:
-                # Переход к следующей главе
-                next_chapter_index = current_chapter_index + 1
-                if next_chapter_index >= len(chapters):
-                    logger.info(f"{Fore.YELLOW}Достигнут конец книги, завершаем сессию{Style.RESET_ALL}")
+
+            # Если read_all = False, применяем вероятности завершения
+            if not read_all:
+                # Вероятность не перейти ко второй главе (80%)
+                if chapters_read_in_session == 1 and random.random() < 0.80:
+                    logger.info(f"{Fore.YELLOW}Пользователь завершил сессию после первой главы{Style.RESET_ALL}")
                     return True
-                if go_to_next_chapter(driver):
-                    current_chapter_index = next_chapter_index
-                    total_time_spent += random.uniform(1, 2)
-                else:
-                    logger.info(f"{Fore.YELLOW}Не удалось перейти к следующей главе, завершаем сессию{Style.RESET_ALL}")
+
+                # Если глава прочитана частично, завершаем сессию
+                if not is_fully_read:
+                    logger.info(f"{Fore.YELLOW}Глава {chapter['chapter_id']} прочитана частично, завершаем сессию{Style.RESET_ALL}")
                     return True
-                continue
 
-            # Вероятность не перейти ко второй главе (80%)
-            if chapters_read_in_session == 1 and random.random() < 0.80:
-                logger.info(f"{Fore.YELLOW}Пользователь завершил сессию после первой главы{Style.RESET_ALL}")
-                return True
-
-            # Если глава прочитана частично, завершаем сессию без перехода к следующей
-            if not is_fully_read:
-                logger.info(f"{Fore.YELLOW}Глава {chapter['chapter_id']} прочитана частично, завершаем сессию{Style.RESET_ALL}")
-                return True
-
-            # Вероятность завершения сессии после текущей главы (10–15%)
-            dropout_chance = random.uniform(0.20, 0.30)
-            if random.random() < dropout_chance:
-                logger.info(f"{Fore.YELLOW}Пользователь завершил сессию после главы {chapter['chapter_id']}{Style.RESET_ALL}")
-                return True
+                # Вероятность завершения сессии после текущей главы (20–30%)
+                dropout_chance = random.uniform(0.20, 0.30)
+                if random.random() < dropout_chance:
+                    logger.info(f"{Fore.YELLOW}Пользователь завершил сессию после главы {chapter['chapter_id']}{Style.RESET_ALL}")
+                    return True
 
             # Переход к следующей главе
             next_chapter_index = current_chapter_index + 1
@@ -677,9 +670,9 @@ def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES,
                 logger.info(f"{Fore.YELLOW}Не удалось перейти к следующей главе, завершаем сессию{Style.RESET_ALL}")
                 return True
 
-        logger.info(f"{Fore.MAGENTA}Сессия {session_id} завершена: прочитано {chapters_read_in_session} глав{Style.RESET_ALL}")
+        logger.info(f"{Fore.MAGENTA}Сессия {session_id} завершена: прочитано {chapters_read_in_session} глав за {total_time_spent:.1f} сек{Style.RESET_ALL}")
         return True
-    
+
     except Exception as e:
         logger.error(f"{Fore.RED}Ошибка в сессии {session_id}: {e}{Style.RESET_ALL}")
         return False
@@ -689,8 +682,8 @@ def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES,
         if user_data_dir and os.path.exists(user_data_dir):
             shutil.rmtree(user_data_dir)
             logger.info(f"{Fore.CYAN}Временная директория {user_data_dir} удалена{Style.RESET_ALL}")
-        
 
+            
 
 
 # Функция для обработки остановки контейнера

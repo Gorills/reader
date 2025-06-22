@@ -18,6 +18,7 @@ import shutil
 import json
 import signal
 import sys
+from datetime import datetime
 
 
 # Путь к временному файлу для хранения данных о воркере
@@ -53,6 +54,47 @@ VISUAL_MODE = False  # True - видимый браузер и одна сесс
 SESSION_DELAY = (2, 5)  # Диапазон задержки между сессиями (в секундах)
 MAX_PROXY_RETRIES = 3
 
+
+
+# Путь к файлу логов сессий
+SESSION_LOG_FILE = "/tmp/session_logs.json"
+
+def init_session_log():
+    """Инициализирует файл логов сессий, если он не существует."""
+    if not os.path.exists(SESSION_LOG_FILE):
+        with open(SESSION_LOG_FILE, 'w') as f:
+            json.dump([], f)
+        logger.info(f"{Fore.GREEN}Создан файл логов сессий: {SESSION_LOG_FILE}{Style.RESET_ALL}")
+
+def append_session_log(session_data):
+    """Добавляет запись о сессии в файл логов."""
+    try:
+        init_session_log()
+        with open(SESSION_LOG_FILE, 'r+') as f:
+            logs = json.load(f)
+            logs.append(session_data)
+            f.seek(0)
+            json.dump(logs, f, indent=2)
+        logger.info(f"{Fore.GREEN}Запись о сессии {session_data['session_id']} добавлена в {SESSION_LOG_FILE}{Style.RESET_ALL}")
+    except Exception as e:
+        logger.error(f"{Fore.RED}Ошибка при записи в файл логов: {e}{Style.RESET_ALL}")
+
+def update_session_log(session_id, updates):
+    """Обновляет запись о сессии в файле логов."""
+    try:
+        init_session_log()
+        with open(SESSION_LOG_FILE, 'r+') as f:
+            logs = json.load(f)
+            for log in logs:
+                if log['session_id'] == session_id:
+                    log.update(updates)
+                    break
+            f.seek(0)
+            f.truncate()
+            json.dump(logs, f, indent=2)
+        logger.info(f"{Fore.GREEN}Запись о сессии {session_id} обновлена{Style.RESET_ALL}")
+    except Exception as e:
+        logger.error(f"{Fore.RED}Ошибка при обновлении файла логов: {e}{Style.RESET_ALL}")
 
 
 def get_container_number():
@@ -481,6 +523,20 @@ def handle_age_verification(driver):
 
 
 def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
+    # Инициализируем запись о сессии
+    session_data = {
+        "session_id": session_id,
+        "worker_id": worker_id,
+        "start_time": datetime.utcnow().isoformat(),
+        "planned_duration": None,  # Будет обновлено позже
+        "end_time": None,
+        "status": "running",
+        "error_message": None,
+        "chapters_read": 0,
+        "total_time_spent": 0
+    }
+    append_session_log(session_data)
+
     # Обновляем данные о воркере перед началом сессии
     try:
         response = requests.get(f"{WORKERS_ENDPOINT}{worker_id}/", headers=HEADERS, timeout=10)
@@ -488,33 +544,63 @@ def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES,
         worker = response.json()
         logger.info(f"{Fore.GREEN}Данные воркера {worker_id} обновлены перед сессией {session_id}{Style.RESET_ALL}")
     except requests.RequestException as e:
-        logger.error(f"{Fore.RED}Ошибка при обновлении данных воркера {worker_id}: {e}{Style.RESET_ALL}")
+        error_message = f"Ошибка при обновлении данных воркера: {e}"
+        logger.error(f"{Fore.RED}{error_message}{Style.RESET_ALL}")
+        update_session_log(session_id, {
+            "end_time": datetime.utcnow().isoformat(),
+            "status": "error",
+            "error_message": error_message
+        })
         return False
 
     # Проверяем, назначена ли книга воркеру
     book_id = worker.get("book_id")
     if not book_id:
-        logger.warning(f"{Fore.YELLOW}У воркера {worker_id} нет назначенной книги{Style.RESET_ALL}")
+        error_message = f"У воркера {worker_id} нет назначенной книги"
+        logger.warning(f"{Fore.YELLOW}{error_message}{Style.RESET_ALL}")
+        update_session_log(session_id, {
+            "end_time": datetime.utcnow().isoformat(),
+            "status": "error",
+            "error_message": error_message
+        })
         return False
 
     # Загружаем актуальные данные о книге
     book = fetch_book_by_id(book_id)
     if not book or "chapters" not in book or not book["active"]:
-        logger.warning(f"{Fore.YELLOW}Книга {book_id} не найдена, не активна или не содержит глав{Style.RESET_ALL}")
+        error_message = f"Книга {book_id} не найдена, не активна или не содержит глав"
+        logger.warning(f"{Fore.YELLOW}{error_message}{Style.RESET_ALL}")
+        update_session_log(session_id, {
+            "end_time": datetime.utcnow().isoformat(),
+            "status": "error",
+            "error_message": error_message
+        })
         return False
 
     read_all = worker.get("read_all", False)
     logger.info(f"{Fore.BLUE}Сессия {session_id}: Обрабатываем книгу {book['name']} (ID: {book['book_id']}), read_all={read_all}{Style.RESET_ALL}")
 
     if not book["active"]:
-        logger.info(f"{Fore.YELLOW}Книга {book['name']} не активна{Style.RESET_ALL}")
+        error_message = f"Книга {book['name']} не активна"
+        logger.info(f"{Fore.YELLOW}{error_message}{Style.RESET_ALL}")
+        update_session_log(session_id, {
+            "end_time": datetime.utcnow().isoformat(),
+            "status": "error",
+            "error_message": error_message
+        })
         return False
 
     use_filters = random.randint(1, 100) <= book["page_percentage"]
     target_book_url = f"https://author.today/reader/{book['book_id']}"
     chapters = [ch for ch in book["chapters"] if ch["active"]]
     if not chapters:
-        logger.warning(f"{Fore.YELLOW}Нет активных глав для книги {book['name']}{Style.RESET_ALL}")
+        error_message = f"Нет активных глав для книги {book['name']}"
+        logger.warning(f"{Fore.YELLOW}{error_message}{Style.RESET_ALL}")
+        update_session_log(session_id, {
+            "end_time": datetime.utcnow().isoformat(),
+            "status": "error",
+            "error_message": error_message
+        })
         return False
 
     # Логируем количество активных глав
@@ -527,6 +613,10 @@ def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES,
         total_session_time += (len(chapters) - 1) * random.uniform(1, 2)  # Время переходов между главами
     logger.info(f"{Fore.MAGENTA}Сессия {session_id}: Рассчитанное время сессии: {total_session_time:.1f} сек (скорость чтения: {reading_speed:.1f} сим/сек){Style.RESET_ALL}")
 
+    # Обновляем планируемую длительность в логе
+    session_data["planned_duration"] = total_session_time
+    update_session_log(session_id, {"planned_duration": total_session_time})
+
     driver = None
     user_data_dir = None
     current_proxy = None
@@ -537,7 +627,13 @@ def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES,
         user_data_dir = tempfile.mkdtemp(prefix="chrome_profile_")
         driver = setup_driver(use_proxies=use_proxies, visual_mode=visual_mode, proxy_list=[current_proxy] if current_proxy else [], user_data_dir=user_data_dir)
         if not driver:
-            logger.error(f"{Fore.RED}Сессия {session_id} не запущена из-за проблем с драйвером{Style.RESET_ALL}")
+            error_message = f"Не удалось настроить драйвер для сессии {session_id}"
+            logger.error(f"{Fore.RED}{error_message}{Style.RESET_ALL}")
+            update_session_log(session_id, {
+                "end_time": datetime.utcnow().isoformat(),
+                "status": "error",
+                "error_message": error_message
+            })
             return False
 
         total_time_spent = 0
@@ -548,7 +644,13 @@ def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES,
         # Заходим на real-rpg-books.ru
         driver.get("https://real-rpg-books.ru/")
         if not check_cloudflare(driver):
-            logger.error(f"{Fore.RED}Не удалось пройти Cloudflare на real-rpg-books.ru{Style.RESET_ALL}")
+            error_message = "Не удалось пройти Cloudflare на real-rpg-books.ru"
+            logger.error(f"{Fore.RED}{error_message}{Style.RESET_ALL}")
+            update_session_log(session_id, {
+                "end_time": datetime.utcnow().isoformat(),
+                "status": "error",
+                "error_message": error_message
+            })
             return False
 
         WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
@@ -588,14 +690,25 @@ def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES,
             except TimeoutException:
                 logger.warning(f"{Fore.YELLOW}Попытка {attempt + 1}/{max_attempts}: Ссылка не найдена{Style.RESET_ALL}")
                 if attempt == max_attempts - 1:
-                    logger.error(f"{Fore.RED}Ссылка для книги {book['book_id']} не найдена{Style.RESET_ALL}")
+                    error_message = f"Ссылка для книги {book['book_id']} не найдена"
+                    logger.error(f"{Fore.RED}{error_message}{Style.RESET_ALL}")
+                    update_session_log(session_id, {
+                        "end_time": datetime.utcnow().isoformat(),
+                        "status": "error",
+                        "error_message": error_message
+                    })
                     return False
-                time.sleep(random.uniform(2, 5))
 
         total_time_spent += stay_time
         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         if not check_cloudflare(driver):
-            logger.error(f"{Fore.RED}Не удалось пройти Cloudflare на странице читалки{Style.RESET_ALL}")
+            error_message = "Не удалось пройти Cloudflare на странице читалки"
+            logger.error(f"{Fore.RED}{error_message}{Style.RESET_ALL}")
+            update_session_log(session_id, {
+                "end_time": datetime.utcnow().isoformat(),
+                "status": "error",
+                "error_message": error_message
+            })
             return False
 
         if handle_age_verification(driver):
@@ -610,7 +723,13 @@ def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES,
 
             # Проверяем корректность chapter_length
             if "chapter_length" not in chapter or chapter["chapter_length"] <= 0:
-                logger.error(f"{Fore.RED}Глава {chapter['chapter_id']} не содержит корректное значение chapter_length{Style.RESET_ALL}")
+                error_message = f"Глава {chapter['chapter_id']} не содержит корректное значение chapter_length"
+                logger.error(f"{Fore.RED}{error_message}{Style.RESET_ALL}")
+                update_session_log(session_id, {
+                    "end_time": datetime.utcnow().isoformat(),
+                    "status": "error",
+                    "error_message": error_message
+                })
                 return False
 
             driver.get(chapter_url)
@@ -623,7 +742,13 @@ def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES,
                 logger.warning(f"{Fore.YELLOW}Ошибка чтения главы {chapter_url}, пробуем новый прокси{Style.RESET_ALL}")
                 proxy_list = get_proxy_list()
                 if not proxy_list:
-                    logger.error(f"{Fore.RED}Не удалось получить новый список прокси{Style.RESET_ALL}")
+                    error_message = "Не удалось получить новый список прокси"
+                    logger.error(f"{Fore.RED}{error_message}{Style.RESET_ALL}")
+                    update_session_log(session_id, {
+                        "end_time": datetime.utcnow().isoformat(),
+                        "status": "error",
+                        "error_message": error_message
+                    })
                     return False
                 current_proxy = random.choice(proxy_list)
                 driver.quit()
@@ -645,36 +770,80 @@ def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES,
                 # Вероятность не перейти ко второй главе (80%)
                 if chapters_read_in_session == 1 and random.random() < 0.80:
                     logger.info(f"{Fore.YELLOW}Пользователь завершил сессию после первой главы{Style.RESET_ALL}")
+                    update_session_log(session_id, {
+                        "end_time": datetime.utcnow().isoformat(),
+                        "status": "completed",
+                        "chapters_read": chapters_read_in_session,
+                        "total_time_spent": total_time_spent
+                    })
                     return True
 
                 # Если глава прочитана частично, завершаем сессию
                 if not is_fully_read:
                     logger.info(f"{Fore.YELLOW}Глава {chapter['chapter_id']} прочитана частично, завершаем сессию{Style.RESET_ALL}")
+                    update_session_log(session_id, {
+                        "end_time": datetime.utcnow().isoformat(),
+                        "status": "completed",
+                        "chapters_read": chapters_read_in_session,
+                        "total_time_spent": total_time_spent
+                    })
                     return True
 
                 # Вероятность завершения сессии после текущей главы (20–30%)
                 dropout_chance = random.uniform(0.20, 0.30)
                 if random.random() < dropout_chance:
                     logger.info(f"{Fore.YELLOW}Пользователь завершил сессию после главы {chapter['chapter_id']}{Style.RESET_ALL}")
+                    update_session_log(session_id, {
+                        "end_time": datetime.utcnow().isoformat(),
+                        "status": "completed",
+                        "chapters_read": chapters_read_in_session,
+                        "total_time_spent": total_time_spent
+                    })
                     return True
 
             # Переход к следующей главе
             next_chapter_index = current_chapter_index + 1
             if next_chapter_index >= len(chapters):
                 logger.info(f"{Fore.YELLOW}Достигнут конец книги, завершаем сессию{Style.RESET_ALL}")
+                update_session_log(session_id, {
+                    "end_time": datetime.utcnow().isoformat(),
+                    "status": "completed",
+                    "chapters_read": chapters_read_in_session,
+                    "total_time_spent": total_time_spent
+                })
                 return True
             if go_to_next_chapter(driver):
                 current_chapter_index = next_chapter_index
                 total_time_spent += random.uniform(1, 2)
             else:
                 logger.info(f"{Fore.YELLOW}Не удалось перейти к следующей главе, завершаем сессию{Style.RESET_ALL}")
+                update_session_log(session_id, {
+                    "end_time": datetime.utcnow().isoformat(),
+                    "status": "completed",
+                    "chapters_read": chapters_read_in_session,
+                    "total_time_spent": total_time_spent
+                })
                 return True
 
         logger.info(f"{Fore.MAGENTA}Сессия {session_id} завершена: прочитано {chapters_read_in_session} глав за {total_time_spent:.1f} сек{Style.RESET_ALL}")
+        update_session_log(session_id, {
+            "end_time": datetime.utcnow().isoformat(),
+            "status": "completed",
+            "chapters_read": chapters_read_in_session,
+            "total_time_spent": total_time_spent
+        })
         return True
 
     except Exception as e:
-        logger.error(f"{Fore.RED}Ошибка в сессии {session_id}: {e}{Style.RESET_ALL}")
+        error_message = f"Неизвестная ошибка в сессии {session_id}: {str(e)}"
+        logger.error(f"{Fore.RED}{error_message}{Style.RESET_ALL}")
+        update_session_log(session_id, {
+            "end_time": datetime.utcnow().isoformat(),
+            "status": "error",
+            "error_message": error_message,
+            "chapters_read": chapters_read_in_session,
+            "total_time_spent": total_time_spent
+        })
         return False
     finally:
         if driver is not None:
@@ -702,7 +871,6 @@ def handle_shutdown(signum, frame, worker_id):
 
 
 
-
 def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
     logger.info(f"{Fore.BLUE}Запуск имитации чтения{Style.RESET_ALL}")
 
@@ -722,6 +890,8 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
     signal.signal(signal.SIGTERM, lambda signum, frame: handle_shutdown(signum, frame, worker_id))
     signal.signal(signal.SIGINT, lambda signum, frame: handle_shutdown(signum, frame, worker_id))
 
+    session_counter = 1  # Счетчик для уникальных ID сессий
+
     while True:
         # Получаем список прокси
         proxy_list = get_proxy_list()
@@ -730,18 +900,19 @@ def simulate_reading(use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
             time.sleep(60)
             continue
         
-        
         # Запускаем сессию с воркером
-        success = simulate_session(1, worker_id, proxy_list, use_proxies=True, visual_mode=visual_mode)
+        success = simulate_session(session_counter, worker_id, proxy_list, use_proxies=True, visual_mode=visual_mode)
 
         if not success:
-            logger.warning(f"{Fore.YELLOW}Сессия завершилась с ошибкой, обновляем прокси и пробуем снова{Style.RESET_ALL}")
+            logger.warning(f"{Fore.YELLOW}Сессия {session_counter} завершилась с ошибкой, обновляем прокси и пробуем снова{Style.RESET_ALL}")
             proxy_list = get_proxy_list()
             if not proxy_list:
                 logger.error(f"{Fore.RED}Не удалось получить прокси, ждем 60 сек{Style.RESET_ALL}")
                 time.sleep(60)
                 continue
             time.sleep(random.uniform(5, 15))
+        
+        session_counter += 1  # Увеличиваем счетчик для следующей сессии
 
 
 

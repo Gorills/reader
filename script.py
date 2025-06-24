@@ -223,16 +223,12 @@ def update_worker(worker_id, active, busy):
 def update_book(book_id, active_workers_delta=None, read_time_delta=None):
     try:
         url = f"{BOOKS_ENDPOINT}{book_id}/"
-        current_book = fetch_book_by_id(book_id)
-        if not current_book:
-            return False
         data = {}
         if active_workers_delta is not None:
             data["active_workers"] = active_workers_delta
         if read_time_delta is not None:
-            current_read_time = float(current_book["read_time"])
-            # Округляем до целого числа
-            data["read_time"] = int(current_read_time + read_time_delta)
+            # Отправляем только новое время чтения, без учета предыдущего
+            data["read_time"] = int(read_time_delta)
         if not data:
             return True
         logger.info(f"Отправляем PATCH-запрос на {url} с данными: {data}")
@@ -261,21 +257,19 @@ def fetch_book_by_id(book_id):
 def update_chapter(chapter_id, read_time_delta):
     try:
         url = f"{CHAPTERS_ENDPOINT}{chapter_id}/"
-        current_chapter = fetch_chapter_by_id(chapter_id)
-        if current_chapter:
-            current_read_time = float(current_chapter["read_time"])
-            # Округляем до целого числа
-            data = {"read_time": int(current_read_time + read_time_delta)}
-            logger.info(f"Отправляем PATCH-запрос на {url} с данными: {data}")
-            response = requests.patch(url, json=data, headers=HEADERS, timeout=10)
-            response.raise_for_status()
-            logger.info(f"{Fore.GREEN}Глава {chapter_id} обновлена: время чтения +{read_time_delta}{Style.RESET_ALL}")
-            return True
-        return False
+        # Отправляем только новое время чтения, без учета предыдущего
+        data = {"read_time": int(read_time_delta)}
+        logger.info(f"Отправляем PATCH-запрос на {url} с данными: {data}")
+        response = requests.patch(url, json=data, headers=HEADERS, timeout=10)
+        response.raise_for_status()
+        logger.info(f"{Fore.GREEN}Глава {chapter_id} обновлена: время чтения {read_time_delta}{Style.RESET_ALL}")
+        return True
     except requests.RequestException as e:
         logger.error(f"{Fore.RED}Ошибка при обновлении главы {chapter_id}: {e}{Style.RESET_ALL}")
         logger.error(f"Ответ сервера: {e.response.text if e.response else 'Нет ответа'}")
         return False
+    
+    
 
 # Функция для получения данных о главе по ID
 def fetch_chapter_by_id(chapter_id):

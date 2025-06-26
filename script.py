@@ -219,6 +219,23 @@ def update_worker(worker_id, active, busy):
         logger.error(f"{Fore.RED}Ошибка при обновлении воркера {worker_id}: {e}{Style.RESET_ALL}")
         return False
 
+
+def update_worker_time(worker_id, read_time_delta):
+    try:
+        url = f"{WORKERS_ENDPOINT}{worker_id}/"
+        # Отправляем только новое время чтения, без учета предыдущего
+        data = {"read_time": int(read_time_delta)}
+        logger.info(f"Отправляем PATCH-запрос на {url} с данными: {data}")
+        response = requests.patch(url, json=data, headers=HEADERS, timeout=10)
+        response.raise_for_status()
+        logger.info(f"{Fore.GREEN}Воркер {worker_id} обновлен: время чтения {read_time_delta}{Style.RESET_ALL}")
+        return True
+    except requests.RequestException as e:
+        logger.error(f"{Fore.RED}Ошибка при обновлении воркера {worker_id}: {e}{Style.RESET_ALL}")
+        logger.error(f"Ответ сервера: {e.response.text if e.response else 'Нет ответа'}")
+        return False
+
+
 # Функция для обновления книги
 def update_book(book_id, active_workers_delta=None, read_time_delta=None):
     try:
@@ -240,7 +257,9 @@ def update_book(book_id, active_workers_delta=None, read_time_delta=None):
         logger.error(f"{Fore.RED}Ошибка при обновлении книги {book_id}: {e}{Style.RESET_ALL}")
         logger.error(f"Ответ сервера: {e.response.text if e.response else 'Нет ответа'}")
         return False
-    
+
+
+
 
 # Функция для получения данных о книге по ID
 def fetch_book_by_id(book_id):
@@ -416,7 +435,7 @@ def navigate_through_filters(driver, book):
 
 
 
-def read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, remaining_time):
+def read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, remaining_time, worker_id):
     try:
         initial_delay = random.uniform(1.5, 3.5)
         # time.sleep(initial_delay)
@@ -478,6 +497,7 @@ def read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, re
                 read_time_delta = time_spent - last_report_time
                 logger.info(f"{Fore.CYAN}Отправка промежуточного времени чтения: {read_time_delta:.1f} сек для книги {book['id']} и главы {chapter['id']}{Style.RESET_ALL}")
                 update_chapter(chapter["id"], read_time_delta=read_time_delta)
+                update_worker_time(worker_id, read_time_delta)
                 last_report_time = time_spent
 
             
@@ -490,6 +510,7 @@ def read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, re
         if final_read_time > 0:
             logger.info(f"{Fore.CYAN}Отправка финального времени чтения: {final_read_time:.1f} сек{Style.RESET_ALL}")
             update_chapter(chapter["id"], read_time_delta=final_read_time)
+            update_worker_time(worker_id, read_time_delta)
         
         
         logger.info(f"{Fore.GREEN}Глава прочитана за {time_spent:.1f} секунд{' (частично)' if not is_fully_read else ''}{Style.RESET_ALL}")
@@ -750,7 +771,7 @@ def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES,
             logger.info(f"{Fore.CYAN}Загружена страница главы: {chapter_url}{Style.RESET_ALL}")
 
             # Читаем главу
-            reading_time, is_fully_read = read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, float('inf'))
+            reading_time, is_fully_read = read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, float('inf'), worker_id)
             if reading_time == 0:
                 logger.warning(f"{Fore.YELLOW}Ошибка чтения главы {chapter_url}, пробуем новый прокси{Style.RESET_ALL}")
                 proxy_list = get_proxy_list()

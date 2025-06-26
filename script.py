@@ -480,7 +480,7 @@ def read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, re
         actions = ActionChains(driver)
         
         # Интервал отправки времени чтения (10 секунд)
-        report_interval = 10
+        report_interval = random.uniform(10, 30)
         last_report_time = time_spent
         
         for stage in range(total_swipes_needed):

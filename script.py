@@ -460,6 +460,10 @@ def read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, re
         body_element = driver.find_element(By.TAG_NAME, "body")
         actions = ActionChains(driver)
         
+        # Интервал отправки времени чтения (10 секунд)
+        report_interval = 10
+        last_report_time = time_spent
+        
         for stage in range(total_swipes_needed):
             if time_spent >= reading_time:
                 break
@@ -468,10 +472,25 @@ def read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, re
                 logger.info(f"{Fore.CYAN}Пауза перед свайпом {stage + 1}: {pause:.1f} сек{Style.RESET_ALL}")
                 time.sleep(pause)
                 time_spent += pause
+            
+            # Проверяем, прошло ли 10 секунд с последней отправки
+            if time_spent - last_report_time >= report_interval:
+                read_time_delta = time_spent - last_report_time
+                logger.info(f"{Fore.CYAN}Отправка промежуточного времени чтения: {read_time_delta:.1f} сек для книги {book['id']} и главы {chapter['id']}{Style.RESET_ALL}")
+                update_chapter(chapter["id"], read_time_delta=read_time_delta)
+                last_report_time = time_spent
+
+            
             actions.move_to_element(body_element).click_and_hold().move_by_offset(0, -swipe_distance).release().perform()
             current_position += swipe_distance
             time.sleep(stage_duration)
             time_spent += stage_duration
+
+        final_read_time = time_spent - last_report_time
+        if final_read_time > 0:
+            logger.info(f"{Fore.CYAN}Отправка финального времени чтения: {final_read_time:.1f} сек{Style.RESET_ALL}")
+            update_chapter(chapter["id"], read_time_delta=final_read_time)
+        
         
         logger.info(f"{Fore.GREEN}Глава прочитана за {time_spent:.1f} секунд{' (частично)' if not is_fully_read else ''}{Style.RESET_ALL}")
         return time_spent, is_fully_read
@@ -754,8 +773,7 @@ def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES,
             chapter["read_time"] += reading_time
             book["read_time"] = int(float(book["read_time"]) + int(reading_time))
 
-            update_book(book["id"], read_time_delta=reading_time)
-            update_chapter(chapter["id"], read_time_delta=reading_time)
+            
 
             logger.info(f"{Fore.GREEN}Глава {chapter['chapter_id']} прочитана за {reading_time:.1f} сек{' (частично)' if not is_fully_read else ''}{Style.RESET_ALL}")
 

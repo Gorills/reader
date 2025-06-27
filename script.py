@@ -482,6 +482,7 @@ def read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, re
         # Интервал отправки времени чтения (10 секунд)
         report_interval = random.uniform(10, 30)
         last_report_time = time_spent
+        final_time = 0
         
         for stage in range(total_swipes_needed):
             if time_spent >= reading_time:
@@ -496,8 +497,7 @@ def read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, re
             if time_spent - last_report_time >= report_interval:
                 read_time_delta = time_spent - last_report_time
                 logger.info(f"{Fore.CYAN}Отправка промежуточного времени чтения: {read_time_delta:.1f} сек для книги {book['id']} и главы {chapter['id']}{Style.RESET_ALL}")
-                update_chapter(chapter["id"], read_time_delta=read_time_delta)
-                update_worker_time(worker_id, read_time_delta)
+                final_time += read_time_delta
                 last_report_time = time_spent
 
             
@@ -507,10 +507,11 @@ def read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, re
             time_spent += stage_duration
 
         final_read_time = time_spent - last_report_time
+        final_time += final_read_time
         if final_read_time > 0:
             logger.info(f"{Fore.CYAN}Отправка финального времени чтения: {final_read_time:.1f} сек{Style.RESET_ALL}")
-            update_chapter(chapter["id"], read_time_delta=final_read_time)
-            update_worker_time(worker_id, read_time_delta)
+            update_chapter(chapter["id"], read_time_delta=final_time)
+            update_worker_time(worker_id, final_time)
         
         
         logger.info(f"{Fore.GREEN}Глава прочитана за {time_spent:.1f} секунд{' (частично)' if not is_fully_read else ''}{Style.RESET_ALL}")

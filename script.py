@@ -1,3 +1,4 @@
+import re
 import time
 import random
 import undetected_chromedriver as uc
@@ -95,6 +96,80 @@ def update_session_log(session_id, updates):
         logger.info(f"{Fore.GREEN}Запись о сессии {session_id} обновлена{Style.RESET_ALL}")
     except Exception as e:
         logger.error(f"{Fore.RED}Ошибка при обновлении файла логов: {e}{Style.RESET_ALL}")
+
+
+
+def check_proxy(proxy, timeout=5, use_selenium_fallback=False):
+    """
+    Проверяет прокси на доступность сайта real-rpg-books.ru и наличие ссылки с utm_source=realrpg.
+    
+    Args:
+        proxy (str): Прокси в формате http://ip:port
+        timeout (int): Таймаут для HTTP-запроса в секундах
+        use_selenium_fallback (bool): Использовать Selenium для проверки, если requests не работает
+    
+    Returns:
+        bool: True если прокси рабочий, False если нерабочий
+    """
+    # Очищаем строку прокси от лишних символов
+    proxy = proxy.strip()
+    # Проверяем формат прокси с помощью регулярного выражения
+    proxy_pattern = r'^(http|https)://[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}:[0-9]{1,5}$'
+    if not re.match(proxy_pattern, proxy):
+        logger.error(f"{Fore.RED}Прокси {proxy} имеет неверный формат{Style.RESET_ALL}")
+        return False
+
+    # Проверка через requests
+    try:
+        session = requests.Session()
+        session.proxies = {"http": proxy, "https": proxy}
+        headers = {"User-Agent": random.choice(user_agents)}
+        
+        logger.info(f"{Fore.CYAN}Проверка прокси {proxy} через requests{Style.RESET_ALL}")
+        response = session.get("https://real-rpg-books.ru", headers=headers, timeout=timeout)
+        response.raise_for_status()
+        
+        # Проверяем наличие ссылки с utm_source=realrpg
+        if "utm_source=realrpg" in response.text:
+            logger.info(f"{Fore.GREEN}Прокси {proxy} рабочий: сайт доступен, ссылка найдена{Style.RESET_ALL}")
+            return True
+        else:
+            logger.warning(f"{Fore.YELLOW}Прокси {proxy} не содержит целевую ссылку{Style.RESET_ALL}")
+            return False
+            
+    except requests.RequestException as e:
+        logger.warning(f"{Fore.YELLOW}Прокси {proxy} не прошел проверку через requests: {e}{Style.RESET_ALL}")
+
+        # Если включен fallback на Selenium и это не повторная попытка
+        if use_selenium_fallback:
+            logger.info(f"{Fore.CYAN}Пробуем проверить прокси {proxy} через Selenium{Style.RESET_ALL}")
+            try:
+                driver = setup_driver(use_proxies=True, visual_mode=False, proxy_list=[proxy])
+                if not driver:
+                    logger.error(f"{Fore.RED}Не удалось настроить драйвер для прокси {proxy}{Style.RESET_ALL}")
+                    return False
+                
+                driver.get("https://real-rpg-books.ru/")
+                try:
+                    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+                    if "utm_source=realrpg" in driver.page_source:
+                        logger.info(f"{Fore.GREEN}Прокси {proxy} рабочий (Selenium): сайт доступен, ссылка найдена{Style.RESET_ALL}")
+                        return True
+                    else:
+                        logger.warning(f"{Fore.YELLOW}Прокси {proxy} не содержит целевую ссылку (Selenium){Style.RESET_ALL}")
+                        return False
+                except TimeoutException:
+                    logger.error(f"{Fore.RED}Таймаут при загрузке страницы через прокси {proxy} (Selenium){Style.RESET_ALL}")
+                    return False
+                finally:
+                    driver.quit()
+            except Exception as e:
+                logger.error(f"{Fore.RED}Ошибка при проверке прокси {proxy} через Selenium: {e}{Style.RESET_ALL}")
+                return False
+        else:
+            logger.error(f"{Fore.RED}Прокси {proxy} нерабочий: {e}{Style.RESET_ALL}")
+            return False
+
 
 
 def get_container_number():
@@ -557,13 +632,15 @@ def handle_age_verification(driver):
     
 
 
+
+# Исправленная функция simulate_session
 def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
     # Инициализируем запись о сессии
     session_data = {
         "session_id": session_id,
         "worker_id": worker_id,
         "start_time": datetime.utcnow().isoformat(),
-        "planned_duration": None,  # Будет обновлено позже
+        "planned_duration": None,
         "end_time": None,
         "status": "running",
         "error_message": None,
@@ -572,7 +649,7 @@ def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES,
     }
     append_session_log(session_data)
 
-    # Обновляем данные о воркере перед началом сессии
+    # Получаем данные воркера
     try:
         response = requests.get(f"{WORKERS_ENDPOINT}{worker_id}/", headers=HEADERS, timeout=10)
         response.raise_for_status()
@@ -641,11 +718,11 @@ def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES,
     # Логируем количество активных глав
     logger.info(f"{Fore.CYAN}Количество активных глав в книге {book['book_id']}: {len(chapters)}{Style.RESET_ALL}")
 
-    # Рассчитываем общее время сессии на основе количества символов в главах
-    reading_speed = random.uniform(40, 60)  # Символов в секунду
+    # Рассчитываем общее время сессии
+    reading_speed = random.uniform(40, 60)
     total_session_time = sum(ch["chapter_length"] / reading_speed * random.uniform(0.9, 1.1) for ch in chapters if "chapter_length" in ch and ch["chapter_length"] > 0)
     if len(chapters) > 1:
-        total_session_time += (len(chapters) - 1) * random.uniform(1, 2)  # Время переходов между главами
+        total_session_time += (len(chapters) - 1) * random.uniform(1, 2)
     logger.info(f"{Fore.MAGENTA}Сессия {session_id}: Рассчитанное время сессии: {total_session_time:.1f} сек (скорость чтения: {reading_speed:.1f} сим/сек){Style.RESET_ALL}")
 
     # Обновляем планируемую длительность в логе
@@ -654,111 +731,20 @@ def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES,
 
     driver = None
     user_data_dir = None
-    current_proxy = None
-    try:
-        if use_proxies and proxy_list:
-            current_proxy = random.choice(proxy_list)
-            logger.info(f"{Fore.CYAN}Используем прокси для сессии: {current_proxy}{Style.RESET_ALL}")
-        user_data_dir = tempfile.mkdtemp(prefix="chrome_profile_")
-        driver = setup_driver(use_proxies=use_proxies, visual_mode=visual_mode, proxy_list=[current_proxy] if current_proxy else [], user_data_dir=user_data_dir)
-        if not driver:
-            error_message = f"Не удалось настроить драйвер для сессии {session_id}"
-            logger.error(f"{Fore.RED}{error_message}{Style.RESET_ALL}")
-            update_session_log(session_id, {
-                "end_time": datetime.utcnow().isoformat(),
-                "status": "error",
-                "error_message": error_message
-            })
-            return False
+    proxy_retries = 0
 
-        total_time_spent = 0
-        chapters_read_in_session = 0
+    while proxy_retries < MAX_PROXY_RETRIES:
+        # Выбираем прокси
+        current_proxy = random.choice(proxy_list) if proxy_list else None
+        logger.info(f"{Fore.CYAN}Проверка прокси: {current_proxy} (попытка {proxy_retries + 1}/{MAX_PROXY_RETRIES}){Style.RESET_ALL}")
 
-        logger.info(f"{Fore.MAGENTA}Старт сессии {session_id}, планируемая длительность: {total_session_time:.1f} сек{Style.RESET_ALL}")
-
-        # Заходим на real-rpg-books.ru
-        driver.get("https://real-rpg-books.ru/")
-        if not check_cloudflare(driver):
-            error_message = "Не удалось пройти Cloudflare на real-rpg-books.ru"
-            logger.error(f"{Fore.RED}{error_message}{Style.RESET_ALL}")
-            update_session_log(session_id, {
-                "end_time": datetime.utcnow().isoformat(),
-                "status": "error",
-                "error_message": error_message
-            })
-            return False
-
-        WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-        logger.info(f"{Fore.CYAN}Страница real-rpg-books.ru загружена{Style.RESET_ALL}")
-
-        # Время на сайте
-        stay_time = random.uniform(3, 5)
-        logger.info(f"{Fore.CYAN}Планируемое время на сайте real-rpg-books.ru: {stay_time:.1f} сек{Style.RESET_ALL}")
-        page_height = driver.execute_script("return document.body.scrollHeight")
-        start_time = time.time()
-        while time.time() - start_time < stay_time - 2:
-            scroll_distance = random.randint(200, 500)
-            direction = random.choice([-1, 1])
-            driver.execute_script(f"window.scrollBy(0, {scroll_distance * direction});")
-            time.sleep(random.uniform(0.5, 2))
-
-        # Переход по ссылке
-        target_link_xpath = f"//a[contains(@href, 'https://author.today/reader/{book['book_id']}/?utm_source=realrpg&utm_medium=referral&utm_campaign=book_link')]"
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            try:
-                book_link = WebDriverWait(driver, 20).until(
-                    EC.presence_of_element_located((By.XPATH, target_link_xpath))
-                )
-                driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", book_link)
-                time.sleep(random.uniform(0.5, 1.5))
-                WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, target_link_xpath)))
-                try:
-                    book_link.click()
-                    logger.info(f"{Fore.GREEN}Обычный клик по ссылке для книги {book['book_id']} выполнен{Style.RESET_ALL}")
-                    break
-                except Exception as e:
-                    logger.warning(f"{Fore.YELLOW}Обычный клик не сработал: {e}, пробуем JavaScript-клик{Style.RESET_ALL}")
-                    driver.execute_script("arguments[0].click();", book_link)
-                    logger.info(f"{Fore.GREEN}JavaScript-клик по ссылке для книги {book['book_id']} выполнен{Style.RESET_ALL}")
-                    break
-            except TimeoutException:
-                logger.warning(f"{Fore.YELLOW}Попытка {attempt + 1}/{max_attempts}: Ссылка не найдена{Style.RESET_ALL}")
-                if attempt == max_attempts - 1:
-                    error_message = f"Ссылка для книги {book['book_id']} не найдена"
-                    logger.error(f"{Fore.RED}{error_message}{Style.RESET_ALL}")
-                    update_session_log(session_id, {
-                        "end_time": datetime.utcnow().isoformat(),
-                        "status": "error",
-                        "error_message": error_message
-                    })
-                    return False
-
-        total_time_spent += stay_time
-        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-        if not check_cloudflare(driver):
-            error_message = "Не удалось пройти Cloudflare на странице читалки"
-            logger.error(f"{Fore.RED}{error_message}{Style.RESET_ALL}")
-            update_session_log(session_id, {
-                "end_time": datetime.utcnow().isoformat(),
-                "status": "error",
-                "error_message": error_message
-            })
-            return False
-
-        if handle_age_verification(driver):
-            total_time_spent += random.uniform(1, 3)
-
-        # Всегда начинаем с первой главы
-        current_chapter_index = 0
-
-        while current_chapter_index < len(chapters):
-            chapter = chapters[current_chapter_index]
-            chapter_url = f"{target_book_url}/{chapter['chapter_id']}"
-
-            # Проверяем корректность chapter_length
-            if "chapter_length" not in chapter or chapter["chapter_length"] <= 0:
-                error_message = f"Глава {chapter['chapter_id']} не содержит корректное значение chapter_length"
+        # Проверяем текущий прокси
+        if use_proxies and current_proxy and not check_proxy(current_proxy):
+            logger.warning(f"{Fore.YELLOW}Прокси {current_proxy} нерабочий, пробуем новый{Style.RESET_ALL}")
+            proxy_retries += 1
+            proxy_list = get_proxy_list() if proxy_retries < MAX_PROXY_RETRIES else []
+            if not proxy_list:
+                error_message = "Не удалось получить новый список прокси"
                 logger.error(f"{Fore.RED}{error_message}{Style.RESET_ALL}")
                 update_session_log(session_id, {
                     "end_time": datetime.utcnow().isoformat(),
@@ -766,18 +752,81 @@ def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES,
                     "error_message": error_message
                 })
                 return False
+            continue
 
-            driver.get(chapter_url)
+        try:
+            user_data_dir = tempfile.mkdtemp(prefix="chrome_profile_")
+            driver = setup_driver(use_proxies=use_proxies, visual_mode=visual_mode, proxy_list=[current_proxy] if current_proxy else [], user_data_dir=user_data_dir)
+            if not driver:
+                raise Exception("Не удалось настроить драйвер")
+
+            total_time_spent = 0
+            chapters_read_in_session = 0
+
+            logger.info(f"{Fore.MAGENTA}Старт сессии {session_id}, планируемая длительность: {total_session_time:.1f} сек{Style.RESET_ALL}")
+
+            # Заходим на real-rpg-books.ru
+            driver.get("https://real-rpg-books.ru/")
+            if not check_cloudflare(driver):
+                raise Exception("Не удалось пройти Cloudflare на real-rpg-books.ru")
+
+            WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+            logger.info(f"{Fore.CYAN}Страница real-rpg-books.ru загружена{Style.RESET_ALL}")
+
+            # Время на сайте
+            stay_time = random.uniform(3, 5)
+            logger.info(f"{Fore.CYAN}Планируемое время на сайте real-rpg-books.ru: {stay_time:.1f} сек{Style.RESET_ALL}")
+            page_height = driver.execute_script("return document.body.scrollHeight")
+            start_time = time.time()
+            while time.time() - start_time < stay_time - 2:
+                scroll_distance = random.randint(200, 500)
+                direction = random.choice([-1, 1])
+                driver.execute_script(f"window.scrollBy(0, {scroll_distance * direction});")
+                time.sleep(random.uniform(0.5, 2))
+
+            # Переход по ссылке
+            target_link_xpath = f"//a[contains(@href, 'https://author.today/reader/{book['book_id']}/?utm_source=realrpg&utm_medium=referral&utm_campaign=book_link')]"
+            max_attempts = 3
+            for attempt in range(max_attempts):
+                try:
+                    book_link = WebDriverWait(driver, 20).until(
+                        EC.presence_of_element_located((By.XPATH, target_link_xpath))
+                    )
+                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", book_link)
+                    time.sleep(random.uniform(0.5, 1.5))
+                    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, target_link_xpath)))
+                    try:
+                        book_link.click()
+                        logger.info(f"{Fore.GREEN}Обычный клик по ссылке для книги {book['book_id']} выполнен{Style.RESET_ALL}")
+                        break
+                    except Exception as e:
+                        logger.warning(f"{Fore.YELLOW}Обычный клик не сработал: {e}, пробуем JavaScript-клик{Style.RESET_ALL}")
+                        driver.execute_script("arguments[0].click();", book_link)
+                        logger.info(f"{Fore.GREEN}JavaScript-клик по ссылке для книги {book['book_id']} выполнен{Style.RESET_ALL}")
+                        break
+                except TimeoutException:
+                    logger.warning(f"{Fore.YELLOW}Попытка {attempt + 1}/{max_attempts}: Ссылка не найдена{Style.RESET_ALL}")
+                    if attempt == max_attempts - 1:
+                        raise Exception(f"Ссылка для книги {book['book_id']} не найдена")
+
+            total_time_spent += stay_time
             WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-            logger.info(f"{Fore.CYAN}Загружена страница главы: {chapter_url}{Style.RESET_ALL}")
+            if not check_cloudflare(driver):
+                raise Exception("Не удалось пройти Cloudflare на странице читалки")
 
-            # Читаем главу
-            reading_time, is_fully_read = read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, float('inf'), worker_id)
-            if reading_time == 0:
-                logger.warning(f"{Fore.YELLOW}Ошибка чтения главы {chapter_url}, пробуем новый прокси{Style.RESET_ALL}")
-                proxy_list = get_proxy_list()
-                if not proxy_list:
-                    error_message = "Не удалось получить новый список прокси"
+            if handle_age_verification(driver):
+                total_time_spent += random.uniform(1, 3)
+
+            # Всегда начинаем с первой главы
+            current_chapter_index = 0
+
+            while current_chapter_index < len(chapters):
+                chapter = chapters[current_chapter_index]
+                chapter_url = f"{target_book_url}/{chapter['chapter_id']}"
+
+                # Проверяем корректность chapter_length
+                if "chapter_length" not in chapter or chapter["chapter_length"] <= 0:
+                    error_message = f"Глава {chapter['chapter_id']} не содержит корректное значение chapter_length"
                     logger.error(f"{Fore.RED}{error_message}{Style.RESET_ALL}")
                     update_session_log(session_id, {
                         "end_time": datetime.utcnow().isoformat(),
@@ -785,108 +834,147 @@ def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES,
                         "error_message": error_message
                     })
                     return False
-                current_proxy = random.choice(proxy_list)
+
+                driver.get(chapter_url)
+                WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+                logger.info(f"{Fore.CYAN}Загружена страница главы: {chapter_url}{Style.RESET_ALL}")
+
+                # Читаем главу
+                reading_time, is_fully_read = read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, float('inf'), worker_id)
+                if reading_time == 0:
+                    logger.warning(f"{Fore.YELLOW}Ошибка чтения главы {chapter_url}, пробуем новый прокси{Style.RESET_ALL}")
+                    proxy_retries += 1
+                    driver.quit()
+                    proxy_list = get_proxy_list() if proxy_retries < MAX_PROXY_RETRIES else []
+                    if not proxy_list:
+                        error_message = "Не удалось получить новый список прокси"
+                        logger.error(f"{Fore.RED}{error_message}{Style.RESET_ALL}")
+                        update_session_log(session_id, {
+                            "end_time": datetime.utcnow().isoformat(),
+                            "status": "error",
+                            "error_message": error_message
+                        })
+                        return False
+                    current_proxy = random.choice(proxy_list)
+                    continue
+
+                total_time_spent += reading_time
+                chapters_read_in_session += 1
+                chapter["read_time"] += reading_time
+                book["read_time"] = int(float(book["read_time"]) + int(reading_time))
+
+                logger.info(f"{Fore.GREEN}Глава {chapter['chapter_id']} прочитана за {reading_time:.1f} сек{' (частично)' if not is_fully_read else ''}{Style.RESET_ALL}")
+
+                # Если read_all = False, применяем вероятности завершения
+                if not read_all:
+                    # Вероятность не перейти ко второй главе (80%)
+                    if chapters_read_in_session == 1 and random.random() < 0.80:
+                        logger.info(f"{Fore.YELLOW}Пользователь завершил сессию после первой главы{Style.RESET_ALL}")
+                        update_session_log(session_id, {
+                            "end_time": datetime.utcnow().isoformat(),
+                            "status": "completed",
+                            "chapters_read": chapters_read_in_session,
+                            "total_time_spent": total_time_spent
+                        })
+                        return True
+
+                    # Если глава прочитана частично, завершаем сессию
+                    if not is_fully_read:
+                        logger.info(f"{Fore.YELLOW}Глава {chapter['chapter_id']} прочитана частично, завершаем сессию{Style.RESET_ALL}")
+                        update_session_log(session_id, {
+                            "end_time": datetime.utcnow().isoformat(),
+                            "status": "completed",
+                            "chapters_read": chapters_read_in_session,
+                            "total_time_spent": total_time_spent
+                        })
+                        return True
+
+                    # Вероятность завершения сессии после текущей главы (20–30%)
+                    dropout_chance = random.uniform(0.20, 0.30)
+                    if random.random() < dropout_chance:
+                        logger.info(f"{Fore.YELLOW}Пользователь завершил сессию после главы {chapter['chapter_id']}{Style.RESET_ALL}")
+                        update_session_log(session_id, {
+                            "end_time": datetime.utcnow().isoformat(),
+                            "status": "completed",
+                            "chapters_read": chapters_read_in_session,
+                            "total_time_spent": total_time_spent
+                        })
+                        return True
+
+                # Переход к следующей главе
+                next_chapter_index = current_chapter_index + 1
+                if next_chapter_index >= len(chapters):
+                    logger.info(f"{Fore.YELLOW}Достигнут конец книги, завершаем сессию{Style.RESET_ALL}")
+                    update_session_log(session_id, {
+                        "end_time": datetime.utcnow().isoformat(),
+                        "status": "completed",
+                        "chapters_read": chapters_read_in_session,
+                        "total_time_spent": total_time_spent
+                    })
+                    return True
+                if go_to_next_chapter(driver):
+                    current_chapter_index = next_chapter_index
+                    total_time_spent += random.uniform(1, 2)
+                else:
+                    logger.info(f"{Fore.YELLOW}Не удалось перейти к следующей главе, завершаем сессию{Style.RESET_ALL}")
+                    update_session_log(session_id, {
+                        "end_time": datetime.utcnow().isoformat(),
+                        "status": "completed",
+                        "chapters_read": chapters_read_in_session,
+                        "total_time_spent": total_time_spent
+                    })
+                    return True
+
+            logger.info(f"{Fore.MAGENTA}Сессия {session_id} завершена: прочитано {chapters_read_in_session} глав за {total_time_spent:.1f} сек{Style.RESET_ALL}")
+            update_session_log(session_id, {
+                "end_time": datetime.utcnow().isoformat(),
+                "status": "completed",
+                "chapters_read": chapters_read_in_session,
+                "total_time_spent": total_time_spent
+            })
+            return True
+
+        except Exception as e:
+            logger.warning(f"{Fore.YELLOW}Ошибка с прокси {current_proxy}: {e}. Пробуем новый прокси (попытка {proxy_retries + 1}/{MAX_PROXY_RETRIES}){Style.RESET_ALL}")
+            proxy_retries += 1
+            if driver:
                 driver.quit()
-                driver = setup_driver(use_proxies=True, visual_mode=visual_mode, proxy_list=[current_proxy], user_data_dir=user_data_dir)
-                continue
-
-            total_time_spent += reading_time
-            chapters_read_in_session += 1
-            chapter["read_time"] += reading_time
-            book["read_time"] = int(float(book["read_time"]) + int(reading_time))
-
-            
-
-            logger.info(f"{Fore.GREEN}Глава {chapter['chapter_id']} прочитана за {reading_time:.1f} сек{' (частично)' if not is_fully_read else ''}{Style.RESET_ALL}")
-
-            # Если read_all = False, применяем вероятности завершения
-            if not read_all:
-                # Вероятность не перейти ко второй главе (80%)
-                if chapters_read_in_session == 1 and random.random() < 0.80:
-                    logger.info(f"{Fore.YELLOW}Пользователь завершил сессию после первой главы{Style.RESET_ALL}")
-                    update_session_log(session_id, {
-                        "end_time": datetime.utcnow().isoformat(),
-                        "status": "completed",
-                        "chapters_read": chapters_read_in_session,
-                        "total_time_spent": total_time_spent
-                    })
-                    return True
-
-                # Если глава прочитана частично, завершаем сессию
-                if not is_fully_read:
-                    logger.info(f"{Fore.YELLOW}Глава {chapter['chapter_id']} прочитана частично, завершаем сессию{Style.RESET_ALL}")
-                    update_session_log(session_id, {
-                        "end_time": datetime.utcnow().isoformat(),
-                        "status": "completed",
-                        "chapters_read": chapters_read_in_session,
-                        "total_time_spent": total_time_spent
-                    })
-                    return True
-
-                # Вероятность завершения сессии после текущей главы (20–30%)
-                dropout_chance = random.uniform(0.20, 0.30)
-                if random.random() < dropout_chance:
-                    logger.info(f"{Fore.YELLOW}Пользователь завершил сессию после главы {chapter['chapter_id']}{Style.RESET_ALL}")
-                    update_session_log(session_id, {
-                        "end_time": datetime.utcnow().isoformat(),
-                        "status": "completed",
-                        "chapters_read": chapters_read_in_session,
-                        "total_time_spent": total_time_spent
-                    })
-                    return True
-
-            # Переход к следующей главе
-            next_chapter_index = current_chapter_index + 1
-            if next_chapter_index >= len(chapters):
-                logger.info(f"{Fore.YELLOW}Достигнут конец книги, завершаем сессию{Style.RESET_ALL}")
+            if user_data_dir and os.path.exists(user_data_dir):
+                try:
+                    shutil.rmtree(user_data_dir)
+                    logger.info(f"{Fore.CYAN}Временная директория {user_data_dir} удалена{Style.RESET_ALL}")
+                except Exception as e:
+                    logger.error(f"{Fore.RED}Ошибка при удалении {user_data_dir}: {e}{Style.RESET_ALL}")
+            proxy_list = get_proxy_list() if proxy_retries < MAX_PROXY_RETRIES else []
+            if not proxy_list:
+                error_message = "Не удалось получить новый список прокси"
+                logger.error(f"{Fore.RED}{error_message}{Style.RESET_ALL}")
                 update_session_log(session_id, {
                     "end_time": datetime.utcnow().isoformat(),
-                    "status": "completed",
-                    "chapters_read": chapters_read_in_session,
-                    "total_time_spent": total_time_spent
+                    "status": "error",
+                    "error_message": error_message
                 })
-                return True
-            if go_to_next_chapter(driver):
-                current_chapter_index = next_chapter_index
-                total_time_spent += random.uniform(1, 2)
-            else:
-                logger.info(f"{Fore.YELLOW}Не удалось перейти к следующей главе, завершаем сессию{Style.RESET_ALL}")
-                update_session_log(session_id, {
-                    "end_time": datetime.utcnow().isoformat(),
-                    "status": "completed",
-                    "chapters_read": chapters_read_in_session,
-                    "total_time_spent": total_time_spent
-                })
-                return True
+                return False
+            continue
 
-        logger.info(f"{Fore.MAGENTA}Сессия {session_id} завершена: прочитано {chapters_read_in_session} глав за {total_time_spent:.1f} сек{Style.RESET_ALL}")
-        update_session_log(session_id, {
-            "end_time": datetime.utcnow().isoformat(),
-            "status": "completed",
-            "chapters_read": chapters_read_in_session,
-            "total_time_spent": total_time_spent
-        })
-        return True
+        finally:
+            if driver is not None:
+                driver.quit()
+            if user_data_dir and os.path.exists(user_data_dir):
+                try:
+                    shutil.rmtree(user_data_dir)
+                    logger.info(f"{Fore.CYAN}Временная директория {user_data_dir} удалена{Style.RESET_ALL}")
+                except Exception as e:
+                    logger.error(f"{Fore.RED}Ошибка при удалении {user_data_dir}: {e}{Style.RESET_ALL}")
 
-    except Exception as e:
-        error_message = f"Неизвестная ошибка в сессии {session_id}: {str(e)}"
-        logger.error(f"{Fore.RED}{error_message}{Style.RESET_ALL}")
-        update_session_log(session_id, {
-            "end_time": datetime.utcnow().isoformat(),
-            "status": "error",
-            "error_message": error_message,
-            "chapters_read": chapters_read_in_session,
-            "total_time_spent": total_time_spent
-        })
-        return False
-    finally:
-        if driver is not None:
-            driver.quit()
-        if user_data_dir and os.path.exists(user_data_dir):
-            shutil.rmtree(user_data_dir)
-            logger.info(f"{Fore.CYAN}Временная директория {user_data_dir} удалена{Style.RESET_ALL}")
-
-            
+    error_message = f"Достигнуто максимальное количество попыток с прокси ({MAX_PROXY_RETRIES})"
+    logger.error(f"{Fore.RED}{error_message}{Style.RESET_ALL}")
+    update_session_log(session_id, {
+        "end_time": datetime.utcnow().isoformat(),
+        "status": "error",
+        "error_message": error_message
+    })
+    return False
 
 
 # Функция для обработки остановки контейнера

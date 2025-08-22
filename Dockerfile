@@ -1,5 +1,5 @@
 # Используем официальный образ Python
-FROM python:3.9-bullseye
+FROM python:3.9
 
 # Устанавливаем рабочую директорию
 WORKDIR /app

@@ -509,8 +509,6 @@ def navigate_through_filters(driver, book):
         return False
 
 
-
-
 def read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, remaining_time, worker_id, apply_read_short=False):
     try:
         initial_delay = random.uniform(1.5, 3.5)
@@ -526,22 +524,39 @@ def read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, re
         reading_speed = random.uniform(40, 60)
         calculated_reading_time = chapter_length / reading_speed
 
-        is_fully_read = True
-        if read_all:
-            reading_time = min(calculated_reading_time * random.uniform(0.9, 1.1), remaining_time)
-            if apply_read_short:
-                # Новая логика: время 90с +/- 15%
-                reading_time = random.uniform(90 * 0.85, 90 * 1.15)
+        # ----> НАЧАЛО ИЗМЕНЕНИЙ (Ваша логика + 1 строка) <----
 
-            logger.info(f"{Fore.YELLOW}Чтение главы {chapter_url} полностью (read_all=True, apply_read_short = {apply_read_short}): {reading_time:.1f} сек{Style.RESET_ALL}")
+        is_fully_read = True # По умолчанию
+        
+        # 1. Сначала определяем БАЗОВОЕ время и статус (по read_all или вероятности)
+        if read_all:
+            reading_time = calculated_reading_time * random.uniform(0.9, 1.1)
+            # is_fully_read уже True
+            logger.info(f"{Fore.YELLOW}Базовая логика: Чтение главы {chapter_url} полностью (read_all=True): {reading_time:.1f} сек{Style.RESET_ALL}")
 
         else:
+            # Стандартная логика
             if random.random() < 0.7:
-                reading_time = min(calculated_reading_time * random.uniform(0.1, 0.3), remaining_time)
+                reading_time = calculated_reading_time * random.uniform(0.1, 0.3)
                 is_fully_read = False
-                logger.info(f"{Fore.YELLOW}Частичное чтение главы {chapter_url}: {reading_time:.1f} сек{Style.RESET_ALL}")
+                logger.info(f"{Fore.YELLOW}Базовая логика: Частичное чтение главы {chapter_url}: {reading_time:.1f} сек{Style.RESET_ALL}")
             else:
-                reading_time = min(calculated_reading_time * random.uniform(0.9, 1.1), remaining_time)
+                reading_time = calculated_reading_time * random.uniform(0.9, 1.1)
+                # is_fully_read уже True
+                logger.info(f"{Fore.YELLOW}Базовая логика: Полное (вероятностное) чтение главы {chapter_url}: {reading_time:.1f} сек{Style.RESET_ALL}")
+
+        # 2. Теперь ПЕРЕОПРЕДЕЛЯЕМ, если apply_read_short=True (Независимо от read_all)
+        if apply_read_short:
+            # Новая логика: время 90с +/- 15%
+            reading_time = random.uniform(90 * 0.85, 90 * 1.15)
+            # И ОБЯЗАТЕЛЬНО меняем статус на "частично"
+            is_fully_read = False 
+            logger.info(f"{Fore.MAGENTA}ПЕРЕОПРЕДЕЛЕНИЕ: apply_read_short=True. Время: {reading_time:.1f} сек, Статус: Частично (False){Style.RESET_ALL}")
+        
+        # 3. Применяем общий лимит (на всякий случай)
+        reading_time = min(reading_time, remaining_time)
+        
+        # ----> КОНЕЦ ИЗМЕНЕНИЙ <----
         
         logger.info(f"{Fore.YELLOW}Начато чтение главы: {chapter_url}, объем: {chapter_length} символов, скорость: {reading_speed:.1f} сим/сек, планируемое время: {reading_time:.1f} сек{Style.RESET_ALL}")
         
@@ -597,7 +612,6 @@ def read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, re
     except Exception as e:
         logger.error(f"{Fore.RED}Ошибка при чтении главы {chapter_url}: {e}{Style.RESET_ALL}")
         return 0, False
-    
 
 
 

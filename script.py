@@ -510,7 +510,8 @@ def navigate_through_filters(driver, book):
 
 
 
-def read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, remaining_time, worker_id):
+
+def read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, remaining_time, worker_id, apply_read_short=False):
     try:
         initial_delay = random.uniform(1.5, 3.5)
         # time.sleep(initial_delay)
@@ -525,14 +526,16 @@ def read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, re
         reading_speed = random.uniform(40, 60)
         calculated_reading_time = chapter_length / reading_speed
 
-        # Если read_all = True, читаем главу полностью
+        is_fully_read = True
         if read_all:
             reading_time = min(calculated_reading_time * random.uniform(0.9, 1.1), remaining_time)
-            is_fully_read = True
-            logger.info(f"{Fore.YELLOW}Чтение главы {chapter_url} полностью (read_all=True): {reading_time:.1f} сек{Style.RESET_ALL}")
+            if apply_read_short:
+                # Новая логика: время 90с +/- 15%
+                reading_time = random.uniform(90 * 0.85, 90 * 1.15)
+
+            logger.info(f"{Fore.YELLOW}Чтение главы {chapter_url} полностью (read_all=True, apply_read_short = {apply_read_short}): {reading_time:.1f} сек{Style.RESET_ALL}")
+
         else:
-            # Вероятность частичного чтения (70% шанс не дочитать главу полностью)
-            is_fully_read = True
             if random.random() < 0.7:
                 reading_time = min(calculated_reading_time * random.uniform(0.1, 0.3), remaining_time)
                 is_fully_read = False
@@ -594,6 +597,8 @@ def read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, re
     except Exception as e:
         logger.error(f"{Fore.RED}Ошибка при чтении главы {chapter_url}: {e}{Style.RESET_ALL}")
         return 0, False
+    
+
 
 
 # Переход к следующей главе через кнопку
@@ -632,8 +637,6 @@ def handle_age_verification(driver):
     
 
 
-
-# Исправленная функция simulate_session
 def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES, visual_mode=VISUAL_MODE):
     # Инициализируем запись о сессии
     session_data = {
@@ -689,8 +692,11 @@ def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES,
         })
         return False
 
+    # ----> НАЧАЛО ИЗМЕНЕНИЙ <----
     read_all = worker.get("read_all", False)
-    logger.info(f"{Fore.BLUE}Сессия {session_id}: Обрабатываем книгу {book['name']} (ID: {book['book_id']}), read_all={read_all}{Style.RESET_ALL}")
+    read_short = worker.get("read_short", False)
+    logger.info(f"{Fore.BLUE}Сессия {session_id}: Обрабатываем книгу {book['name']} (ID: {book['book_id']}), read_all={read_all}, read_short={read_short}{Style.RESET_ALL}")
+    # ----> КОНЕЦ ИЗМЕНЕНИЙ <----
 
     if not book["active"]:
         error_message = f"Книга {book['name']} не активна"
@@ -835,12 +841,29 @@ def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES,
                     })
                     return False
 
+                # ----> НАЧАЛО ИЗМЕНЕНИЙ <----
+                # Определяем, применяется ли read_short к ЭТОЙ главе
+                apply_read_short = read_short and current_chapter_index == 0
+                # ----> КОНЕЦ ИЗМЕНЕНИЙ <----
+
                 driver.get(chapter_url)
                 WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
                 logger.info(f"{Fore.CYAN}Загружена страница главы: {chapter_url}{Style.RESET_ALL}")
 
+                # ----> НАЧАЛО ИЗМЕНЕНИЙ <----
                 # Читаем главу
-                reading_time, is_fully_read = read_chapter_mobile(driver, book, read_all, target_book_url, chapter_url, float('inf'), worker_id)
+                reading_time, is_fully_read = read_chapter_mobile(
+                    driver, 
+                    book, 
+                    read_all, 
+                    target_book_url, 
+                    chapter_url, 
+                    float('inf'), 
+                    worker_id,
+                    apply_read_short  # <-- Передаем новый флаг
+                )
+                # ----> КОНЕЦ ИЗМЕНЕНИЙ <----
+
                 if reading_time == 0:
                     logger.warning(f"{Fore.YELLOW}Ошибка чтения главы {chapter_url}, пробуем новый прокси{Style.RESET_ALL}")
                     proxy_retries += 1
@@ -864,6 +887,20 @@ def simulate_session(session_id, worker_id, proxy_list, use_proxies=USE_PROXIES,
                 book["read_time"] = int(float(book["read_time"]) + int(reading_time))
 
                 logger.info(f"{Fore.GREEN}Глава {chapter['chapter_id']} прочитана за {reading_time:.1f} сек{' (частично)' if not is_fully_read else ''}{Style.RESET_ALL}")
+
+                # ----> НАЧАЛО ИЗМЕНЕНИЙ <----
+                # Если read_short, выходим ПОСЛЕ первой главы
+                if apply_read_short:
+                    logger.info(f"{Fore.YELLOW}read_short активен. Завершаем сессию после первой главы.{Style.RESET_ALL}")
+                    update_session_log(session_id, {
+                        "end_time": datetime.utcnow().isoformat(),
+                        "status": "completed",
+                        "chapters_read": chapters_read_in_session,
+                        "total_time_spent": total_time_spent
+                    })
+                    return True # Завершаем сессию
+                # ----> КОНЕЦ ИЗМЕНЕНИЙ <----
+
 
                 # Если read_all = False, применяем вероятности завершения
                 if not read_all:
